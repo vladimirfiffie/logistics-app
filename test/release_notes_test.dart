@@ -38,8 +38,36 @@ void main() {
       for (final note in releaseNotes) {
         expect(note.version, isNotEmpty);
         expect(note.headline, isNotEmpty);
-        expect(note.changes, isNotEmpty);
+        expect(note.isEmpty, isFalse, reason: '${note.version} says nothing');
         expect(note.tag, startsWith('v'));
+      }
+    });
+
+    test('highlights stay short enough to be highlights', () {
+      for (final note in releaseNotes) {
+        expect(
+          note.highlights.length,
+          lessThanOrEqualTo(6),
+          reason:
+              '${note.version}: if everything is a highlight, nothing is — '
+              'move the rest to minor',
+        );
+      }
+    });
+
+    test('change titles are a few words, not a sentence', () {
+      for (final note in releaseNotes) {
+        for (final change in [...note.highlights, ...note.fixes]) {
+          expect(change.title, isNotEmpty);
+          expect(
+            change.title.length,
+            lessThanOrEqualTo(40),
+            reason: 'bold titles wrap badly: "${change.title}"',
+          );
+          // The detail carries the sentence; a title ending in a full stop
+          // means the split was done wrong.
+          expect(change.title.endsWith('.'), isFalse);
+        }
       }
     });
 
@@ -53,13 +81,33 @@ void main() {
         version: version,
         date: DateTime.utc(2026, 1, 1),
         headline: 'x',
-        changes: const ['y'],
+        minor: const ['y'],
       );
 
       expect(noteFor('1.0.0-beta.1').isPrerelease, isTrue);
       expect(noteFor('1.0.0-rc.2').isPrerelease, isTrue);
       expect(noteFor('1.0.0').isPrerelease, isFalse);
       expect(noteFor('2.3.4').isPrerelease, isFalse);
+    });
+  });
+
+  group('rendering contract', () {
+    test('a change renders with and without a detail', () {
+      const withDetail = ReleaseChange('Title', 'Detail.');
+      const bare = ReleaseChange('Title');
+
+      expect(withDetail.detail, 'Detail.');
+      expect(bare.detail, isNull);
+    });
+
+    test('an entry with nothing in it is flagged empty', () {
+      final empty = ReleaseNote(
+        version: '0.0.1',
+        date: DateTime.utc(2026, 1, 1),
+        headline: 'x',
+      );
+
+      expect(empty.isEmpty, isTrue);
     });
   });
 

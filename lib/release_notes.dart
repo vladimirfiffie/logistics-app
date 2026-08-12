@@ -5,12 +5,30 @@
 /// imports it under plain `dart run`, which has no Flutter SDK available.
 library;
 
+/// One line of a changelog: a short bold [title] and an optional plain
+/// [detail].
+///
+/// Split rather than one string so both renderers can emphasise the same part.
+/// Embedding markdown in the text would work on GitHub and show up as literal
+/// asterisks in the app.
+class ReleaseChange {
+  const ReleaseChange(this.title, [this.detail]);
+
+  /// A few words. Rendered bold.
+  final String title;
+
+  /// The sentence explaining it, if it needs one.
+  final String? detail;
+}
+
 class ReleaseNote {
   const ReleaseNote({
     required this.version,
     required this.date,
     required this.headline,
-    required this.changes,
+    this.highlights = const [],
+    this.fixes = const [],
+    this.minor = const [],
   });
 
   /// Must match `version:` in pubspec.yaml minus the `+build` suffix.
@@ -22,9 +40,15 @@ class ReleaseNote {
   /// One line summarising the release, shown as the sheet's subtitle.
   final String headline;
 
-  /// User-facing bullets. Write what changed for a driver, not what changed
-  /// in the code.
-  final List<String> changes;
+  /// The reasons to care about this release. Keep it to a handful — if
+  /// everything is a highlight, nothing is.
+  final List<ReleaseChange> highlights;
+
+  /// Things that were broken and now are not.
+  final List<ReleaseChange> fixes;
+
+  /// Everything else. Worth recording, not worth a driver's attention.
+  final List<String> minor;
 
   /// Tag form, e.g. `v1.0.0-beta.1`.
   String get tag => 'v$version';
@@ -32,34 +56,99 @@ class ReleaseNote {
   /// A hyphen means a prerelease: `1.0.0-beta.1` yes, `1.0.0` no. The release
   /// workflow applies the same rule to decide GitHub's prerelease flag.
   bool get isPrerelease => version.contains('-');
+
+  /// Used to guard against an entry that says nothing.
+  bool get isEmpty => highlights.isEmpty && fixes.isEmpty && minor.isEmpty;
 }
 
 /// Newest first. The first entry is the current version.
 final releaseNotes = <ReleaseNote>[
   ReleaseNote(
+    version: '1.0.0-beta.2',
+    date: DateTime.utc(2026, 8, 11),
+    headline: 'A home screen, driving conditions, and a lot more control.',
+    highlights: [
+      ReleaseChange(
+        'A new Home screen',
+        'How the day is going, how far you have driven, what is next, and one '
+            'tap to get on with it.',
+      ),
+      ReleaseChange(
+        'Driving conditions',
+        'With a warning when there is ice, fog, snow, heavy rain, or wind '
+            'strong enough to matter in a high-sided van.',
+      ),
+      ReleaseChange(
+        'Arrival alerts',
+        'A notification when you come within range of a stop, so you do not '
+            'miss it while your nav app is on screen.',
+      ),
+      ReleaseChange(
+        'Slide to complete',
+        'A bump in the cab can no longer close out the wrong stop. Switch it '
+            'back to a tap in Settings.',
+      ),
+      ReleaseChange(
+        'Make it yours',
+        'Themes, six accent colours, an AMOLED black mode, miles or '
+            'kilometres, haptics, and a GPS setting that trades battery for '
+            'detail.',
+      ),
+    ],
+    fixes: [
+      ReleaseChange(
+        'The location button works',
+        'Tapping it on the live map did nothing until you had driven far '
+            'enough for a new fix.',
+      ),
+      ReleaseChange(
+        'The slider unsticks',
+        'Backing out of the completion sheet left it stuck at the end, so the '
+            'stop could never be closed.',
+      ),
+    ],
+    minor: [
+      'Closing out a stop now shows what that trip took, and where you are '
+          'heading next.',
+      'Put your name and van on the app so the home screen greets you '
+          'properly.',
+      'Add more stops from the manifest when you need a bigger round to test '
+          'with.',
+      'Replay the introduction any time from Settings.',
+      'Require a proof photo before a stop can be closed, if your depot works '
+          'that way.',
+      'Your stops, routes and photos still never leave the phone. The weather '
+          'card is the one exception, and it can be switched off.',
+    ],
+  ),
+  ReleaseNote(
     version: '1.0.0-beta.1',
     date: DateTime.utc(2026, 8, 11),
     headline: 'First beta: your round, tracked end to end.',
-    changes: [
-      'Track a delivery from start to doorstep, with your route recorded as '
-          'you drive.',
-      'Tracking keeps running with the screen off or while you are in your '
-          'nav app, and shows a notification the whole time so it can never '
-          'run unnoticed.',
+    highlights: [
+      ReleaseChange(
+        'Track a delivery end to end',
+        'From starting the stop to the doorstep, with your route recorded as '
+            'you drive.',
+      ),
+      ReleaseChange(
+        'Keeps running in your pocket',
+        'Tracking survives the screen going off or you switching to your nav '
+            'app, and shows a notification the whole time so it can never run '
+            'unnoticed.',
+      ),
+      ReleaseChange(
+        'Proof at the door',
+        'Close out a stop with a name and a photo, or record why it could not '
+            'be delivered.',
+      ),
+    ],
+    minor: [
       'Live view shows distance to go, distance driven, elapsed time, speed '
           'and GPS accuracy.',
-      'Close out a stop with the recipient name and a photo, or record why it '
-          'could not be delivered.',
       'Sort the day by time slot or by which stop is nearest.',
-      'Get a notification when you come within range of a stop, so you do '
-          'not miss it while your nav app is on screen.',
-      'A home screen with the day at a glance: progress, distance driven, '
-          'what is next, and driving conditions.',
       'History keeps every closed stop with the distance and time it took.',
-      'Themes, accent colours, an AMOLED black mode, miles or kilometres, '
-          'haptics and GPS accuracy are all yours to set.',
-      'Your stops, routes and photos never leave the phone. The weather card '
-          'is the one exception, and it can be switched off.',
+      'Everything stays on the device. Nothing is uploaded.',
     ],
   ),
 ];

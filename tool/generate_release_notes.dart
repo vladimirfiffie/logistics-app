@@ -62,14 +62,39 @@ void main(List<String> args) {
       ..writeln()
       ..writeln(note.headline)
       ..writeln();
-    for (final change in note.changes) {
-      buffer.writeln('- $change');
+
+    _section(buffer, "### What's new", note.highlights);
+    _section(buffer, '### Fixed', note.fixes);
+
+    if (note.minor.isNotEmpty) {
+      buffer
+        ..writeln('### Also')
+        ..writeln();
+      for (final line in note.minor) {
+        buffer.writeln('- $line');
+      }
+      buffer.writeln();
     }
   }
 
-  buffer
-    ..writeln()
-    ..write(_abiTable);
+  buffer.write(_abiTable);
 
   stdout.write(buffer);
+}
+
+/// Writes a `- **Title** — detail` list, skipping the heading entirely when
+/// there is nothing under it. An empty "Fixed" heading reads like an
+/// oversight.
+void _section(StringBuffer buffer, String heading, List<ReleaseChange> items) {
+  if (items.isEmpty) return;
+  buffer
+    ..writeln(heading)
+    ..writeln();
+  for (final item in items) {
+    final detail = item.detail;
+    buffer.writeln(
+      detail == null ? '- **${item.title}**' : '- **${item.title}** — $detail',
+    );
+  }
+  buffer.writeln();
 }
