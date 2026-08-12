@@ -68,6 +68,59 @@ class ReleaseNote {
 /// back into the last one.
 final releaseNotes = <ReleaseNote>[
   ReleaseNote(
+    version: '1.0.0-beta.4',
+    date: DateTime.utc(2026, 8, 12),
+    headline: 'The clock, the stop button, and units that are yours.',
+    highlights: [
+      ReleaseChange(
+        'Set the units you read',
+        'Temperature is its own choice now instead of following miles and '
+            'kilometres — pick Celsius or Fahrenheit outright. Dates come in '
+            'five formats, and the clock does 12- or 24-hour.',
+      ),
+      ReleaseChange(
+        'The van tag has a proper home',
+        'Settings tells you whether this phone can do NFC, lets you write a '
+            'tag, reads one back so you can check it works, and lets you turn '
+            'the tag prompt off entirely.',
+      ),
+      ReleaseChange(
+        'Less clutter at the top',
+        'The icons above each page are gone. Settings is a card on Home, '
+            '"add stops" is a button on the manifest, and sorting is a row of '
+            'chips — now including A to Z.',
+      ),
+    ],
+    fixes: [
+      ReleaseChange(
+        'Your shift clock runs',
+        'It sat at "0s" all day. It now counts up while you are clocked on.',
+      ),
+      ReleaseChange(
+        'Clocking on says what happened',
+        'If it failed it did so silently, leaving the button looking dead. '
+            'Clocking off asks first and tells you how long you worked.',
+      ),
+      ReleaseChange(
+        'Stop recording actually stops',
+        'The stop stayed "In transit" with nothing recording behind it. '
+            'Stopping now asks first, offers to keep sharing, confirms when it '
+            'is done, and puts the stop back on the manifest.',
+      ),
+      ReleaseChange(
+        'Finished stops keep their distance',
+        'Closing out a stop was deleting the route it had just recorded, so '
+            'the distance you drove to it vanished the moment you delivered.',
+      ),
+    ],
+    minor: [
+      'Clocking off stops a trip that is still recording, rather than leaving '
+          'the GPS running after your day has ended.',
+      'The arrival alert clears itself when the trip it belongs to finishes.',
+      'The weather card shows what the temperature feels like.',
+    ],
+  ),
+  ReleaseNote(
     version: '1.0.0-beta.3',
     date: DateTime.utc(2026, 8, 12),
     headline: 'Clock on with a tap.',
