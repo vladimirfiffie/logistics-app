@@ -20,7 +20,8 @@ import 'nfc_scan_sheet.dart';
 import 'formatters.dart';
 import 'settings_screen.dart';
 import 'widgets/app_sheet.dart';
-import 'widgets/page_header.dart';
+import 'widgets/outcome_colors.dart';
+import 'widgets/page_top_inset.dart';
 import 'widgets/status_chip.dart';
 
 /// The at-a-glance screen: how the day is going, what is next, and one tap to
@@ -205,14 +206,7 @@ class _HomeTabState extends State<HomeTab> with WidgetsBindingObserver {
     if (shifts.isBusy) return;
 
     if (shifts.isOnBreak) {
-      final finished = await shifts.endBreak();
-      await AppHaptics.trackingStarted();
-      if (!mounted) return;
-      _say(
-        finished == null
-            ? 'Could not end the break.'
-            : 'Back on the clock · ${formatDuration(finished.duration)} break.',
-      );
+      await _endBreak(shifts);
       return;
     }
 
@@ -253,6 +247,59 @@ class _HomeTabState extends State<HomeTab> with WidgetsBindingObserver {
       started == null
           ? 'Could not start a break.'
           : '${kind.detail} started. The clock is paused.',
+    );
+  }
+
+  /// Going back on the clock confirms the same way clocking off does. It is
+  /// the same one-tap button either way, and a break ended by accident is not
+  /// something the driver can put back — the minutes are already on the
+  /// timesheet.
+  Future<void> _endBreak(ShiftController shifts) async {
+    final taken = formatDuration(
+      shifts.currentBreak?.duration ?? Duration.zero,
+    );
+
+    final confirmed = await showAppSheet<bool>(
+      context,
+      builder: (sheetContext) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SheetHeader(
+              title: 'Back to work?',
+              subtitle:
+                  "You've been on a break for $taken. It stops counting the "
+                  'moment you tap, and the time already taken stays on your '
+                  'timesheet.',
+              icon: Icons.play_arrow,
+            ),
+            const SizedBox(height: 22),
+            FilledButton(
+              onPressed: () => Navigator.of(sheetContext).pop(true),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+              ),
+              child: const Text('Back to work'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(sheetContext).pop(false),
+              child: const Text('Stay on break'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final finished = await shifts.endBreak();
+    await AppHaptics.trackingStarted();
+    if (!mounted) return;
+    _say(
+      finished == null
+          ? 'Could not end the break.'
+          : 'Back on the clock · ${formatDuration(finished.duration)} break.',
     );
   }
 
@@ -374,7 +421,7 @@ class _HomeTabState extends State<HomeTab> with WidgetsBindingObserver {
       },
       child: CustomScrollView(
         slivers: [
-          const PageHeaderBar('Home'),
+          const SliverStatusBarInset(),
 
           SliverToBoxAdapter(
             child: Padding(
@@ -1148,7 +1195,7 @@ class _AllDoneCard extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
       child: Card(
         elevation: 0,
-        color: theme.colorScheme.tertiaryContainer,
+        color: context.deliveredContainer,
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Row(
@@ -1156,7 +1203,7 @@ class _AllDoneCard extends StatelessWidget {
               Icon(
                 Icons.task_alt,
                 size: 34,
-                color: theme.colorScheme.onTertiaryContainer,
+                color: context.onDeliveredContainer,
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -1167,13 +1214,13 @@ class _AllDoneCard extends StatelessWidget {
                       'Round complete',
                       style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w700,
-                        color: theme.colorScheme.onTertiaryContainer,
+                        color: context.onDeliveredContainer,
                       ),
                     ),
                     Text(
                       'Every stop is closed out.',
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onTertiaryContainer,
+                        color: context.onDeliveredContainer,
                       ),
                     ),
                   ],

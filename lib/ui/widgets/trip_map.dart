@@ -17,7 +17,13 @@ class TripMap extends StatefulWidget {
     this.followDriver = true,
     this.recentreRequest = 0,
     this.interactive = true,
+    this.onLongPress,
   });
+
+  /// Long press anywhere on the map. Goes through the map's own gesture
+  /// handling rather than a `GestureDetector` over the top, which would have
+  /// to fight the pan and pinch recognisers for it.
+  final VoidCallback? onLongPress;
 
   /// The stop's address, drawn as a pin.
   final LatLng destination;
@@ -81,6 +87,9 @@ class _TripMapState extends State<TripMap> {
         initialCenter: centre,
         initialZoom: 14.5,
         onMapReady: () => _mapReady = true,
+        onLongPress: widget.onLongPress == null
+            ? null
+            : (_, _) => widget.onLongPress!(),
         interactionOptions: InteractionOptions(
           flags: widget.interactive
               ? InteractiveFlag.all & ~InteractiveFlag.rotate

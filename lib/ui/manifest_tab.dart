@@ -16,7 +16,7 @@ import 'delivery_detail_sheet.dart';
 import 'formatters.dart';
 import 'widgets/app_sheet.dart';
 import 'widgets/delivery_card.dart';
-import 'widgets/page_header.dart';
+import 'widgets/page_top_inset.dart';
 
 /// The driver's run for the day: every stop still to be done.
 class ManifestTab extends StatefulWidget {
@@ -250,7 +250,7 @@ class _ManifestTabState extends State<ManifestTab> {
         },
         child: CustomScrollView(
           slivers: [
-            const PageHeaderBar("Today's run"),
+            const SliverStatusBarInset(),
 
             SliverToBoxAdapter(
               child: Padding(

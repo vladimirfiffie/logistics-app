@@ -49,6 +49,38 @@ class NfcScanFailed extends NfcScanResult {
   final Object error;
 }
 
+/// What came back from trying to write a tag.
+///
+/// Typed rather than "null means it worked, a string means it did not",
+/// because the sheet has to draw three genuinely different things: a written
+/// tag, a tag this phone can read but can never write, and something that
+/// simply went wrong and is worth another go.
+sealed class NfcWriteResult {
+  const NfcWriteResult();
+}
+
+/// The tag now carries the van's payload.
+class NfcWriteDone extends NfcWriteResult {
+  const NfcWriteDone(this.tag);
+  final VanTag tag;
+}
+
+/// The tag itself cannot hold this: not NDEF, write-protected, or too small.
+/// Another tag will work; retrying with this one never will.
+class NfcWriteIncompatible extends NfcWriteResult {
+  const NfcWriteIncompatible(this.reason);
+
+  /// Said to someone holding a sticker against a phone, so it names the
+  /// problem and what to do instead.
+  final String reason;
+}
+
+/// No tag arrived, or the platform threw. Worth trying again.
+class NfcWriteFailed extends NfcWriteResult {
+  const NfcWriteFailed(this.reason);
+  final String reason;
+}
+
 /// Wraps `nfc_manager` so nothing else in the app imports it — the same trick
 /// as [LocationService], and what makes the controllers testable without a
 /// phone to tap things against.
@@ -112,16 +144,18 @@ class NfcService {
 
   /// Writes [tag]'s payload onto the next tag presented.
   ///
-  /// Returns null on success, or a human-readable reason it failed — the
-  /// caller has to explain this to someone holding a phone against a sticker,
-  /// so "unwritable tag" beats a stack trace.
-  Future<String?> writeVanTag(
+  /// Always resolves, and never throws at the caller — someone is holding a
+  /// phone against a sticker waiting for an answer, so every failure comes
+  /// back as something that can be read out loud.
+  Future<NfcWriteResult> writeVanTag(
     VanTag tag, {
     Duration timeout = const Duration(seconds: 30),
   }) async {
-    if (_sessionOpen) return 'A scan is already running.';
+    if (_sessionOpen) {
+      return const NfcWriteFailed('A scan is already running.');
+    }
 
-    final completer = Completer<String?>();
+    final completer = Completer<NfcWriteResult>();
     _sessionOpen = true;
 
     try {
@@ -135,13 +169,13 @@ class NfcService {
       );
     } catch (error) {
       _sessionOpen = false;
-      return '$error';
+      return NfcWriteFailed('$error');
     }
 
     try {
       return await completer.future.timeout(timeout);
     } on TimeoutException {
-      return 'No tag was detected.';
+      return const NfcWriteFailed('No tag was detected.');
     } finally {
       await _stop();
     }
@@ -164,14 +198,21 @@ class NfcService {
     }
   }
 
-  Future<String?> _write(NfcTag discovered, VanTag tag) async {
+  Future<NfcWriteResult> _write(NfcTag discovered, VanTag tag) async {
     try {
       final ndef = NdefAndroid.from(discovered);
       if (ndef == null) {
-        return 'That tag cannot store text. Use an NDEF-formatted tag '
-            '(NTAG213 or similar).';
+        return const NfcWriteIncompatible(
+          'This one cannot store text at all. Van tags need to be NDEF '
+          'formatted — an NTAG213 sticker or similar.',
+        );
       }
-      if (!ndef.isWritable) return 'That tag is locked and cannot be written.';
+      if (!ndef.isWritable) {
+        return const NfcWriteIncompatible(
+          'This one is write-protected, so nothing can be put on it. Try a '
+          'blank tag.',
+        );
+      }
 
       final message = NdefMessage(
         records: [
@@ -185,14 +226,16 @@ class NfcService {
       );
 
       if (message.byteLength > ndef.maxSize) {
-        return 'That tag is too small — it holds ${ndef.maxSize} bytes and '
-            'this needs ${message.byteLength}.';
+        return NfcWriteIncompatible(
+          'This one is too small — it holds ${ndef.maxSize} bytes and the van '
+          'name needs ${message.byteLength}.',
+        );
       }
 
       await ndef.writeNdefMessage(message);
-      return null;
+      return NfcWriteDone(tag);
     } catch (error) {
-      return '$error';
+      return NfcWriteFailed('$error');
     }
   }
 

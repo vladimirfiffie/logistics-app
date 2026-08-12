@@ -68,6 +68,72 @@ class ReleaseNote {
 /// back into the last one.
 final releaseNotes = <ReleaseNote>[
   ReleaseNote(
+    version: '1.0.0-beta.6',
+    date: DateTime.utc(2026, 8, 12),
+    headline: 'More screen, greener ticks, and settings you can find.',
+    highlights: [
+      ReleaseChange(
+        'Every page starts at the top',
+        'The big title bar above each tab is gone, and with it the grey slab '
+            'that slid in the moment you dragged the page. The screen is for '
+            'your round, not for a word already printed on the tab underneath.',
+      ),
+      ReleaseChange(
+        'History, rebuilt',
+        'Grouped under Today and Yesterday, with a card for how the day went '
+            'and a card per stop carrying the outcome, the time, who signed '
+            'for it and how far you drove to get there.',
+      ),
+      ReleaseChange(
+        'Delivered is green',
+        'A closed-out stop was coming out purple, orange or red depending on '
+            'your accent colour. Green means delivered now — on the chip, on '
+            'the stop, in history and on your timesheet — whatever theme you '
+            'run.',
+      ),
+      ReleaseChange(
+        'Settings you can find',
+        'One list of sixty rows is now twelve categories, each on its own '
+            'screen and each saying what is set inside it. Checking a value '
+            'usually no longer means opening anything.',
+      ),
+      ReleaseChange(
+        'Writing a van tag shows its working',
+        'Tapping "write a van tag" opens the same reader you clock on with: '
+            'hold the sticker there, and it tells you the tag is ready, or '
+            'that this particular tag will never work and why.',
+      ),
+      ReleaseChange(
+        'Just the map',
+        'Long press the live map to clear everything off it, and long press '
+            'again to bring it back. Useful on a windscreen mount, where the '
+            'panel covers the road you are looking at.',
+      ),
+    ],
+    fixes: [
+      ReleaseChange(
+        'No grey bar on a pull-down',
+        'Dragging any page down slid a grey block in behind the title. It was '
+            'the app bar tinting itself, and it is gone everywhere.',
+      ),
+      ReleaseChange(
+        'Back to work asks first',
+        'Ending a break was one tap with no confirmation, on the same button '
+            'that starts one — and the minutes are already on your timesheet '
+            'by the time you notice.',
+      ),
+    ],
+    minor: [
+      'Units are called Metric and Imperial, in setup and in Settings, rather '
+          'than "km / km-h" and "mi / mph".',
+      'Setup says what your unit choice does to the weather card as you pick '
+          'it.',
+      'History counts your trips and total driving alongside the distance.',
+      'The tag writer replaces the row that spun and then fired a message you '
+          'had already stopped looking at.',
+    ],
+  ),
+  ReleaseNote(
     version: '1.0.0-beta.5',
     date: DateTime.utc(2026, 8, 12),
     headline: 'Timesheets, breaks, exports and a route that plans itself.',

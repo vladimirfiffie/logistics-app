@@ -6,6 +6,7 @@ import '../models/shift.dart';
 import '../models/shift_break.dart';
 import '../state/shift_controller.dart';
 import 'formatters.dart';
+import 'widgets/outcome_colors.dart';
 
 /// Every shift the driver has worked, grouped by week.
 ///
@@ -169,13 +170,16 @@ class _WeekHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
+
+    // The same green a delivered stop is drawn in: a week of hours banked is
+    // work done, and it should not be a different colour from a drop done.
+    final onCard = context.onDeliveredContainer;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
       child: Card(
         elevation: 0,
-        color: scheme.primaryContainer,
+        color: context.deliveredContainer,
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Row(
@@ -187,7 +191,7 @@ class _WeekHeader extends StatelessWidget {
                     Text(
                       'Week of ${formatDate(weekStart)}',
                       style: theme.textTheme.labelMedium?.copyWith(
-                        color: scheme.onPrimaryContainer,
+                        color: onCard,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -196,16 +200,14 @@ class _WeekHeader extends StatelessWidget {
                       formatDuration(worked),
                       style: theme.textTheme.headlineSmall?.copyWith(
                         fontWeight: FontWeight.w700,
-                        color: scheme.onPrimaryContainer,
+                        color: onCard,
                       ),
                     ),
                     Text(
                       '$shifts ${shifts == 1 ? 'shift' : 'shifts'}'
                       '${breaks == Duration.zero ? '' : ' · ${formatDuration(breaks)} on breaks'}',
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onPrimaryContainer.withValues(
-                          alpha: 0.85,
-                        ),
+                        color: onCard.withValues(alpha: 0.85),
                       ),
                     ),
                   ],
@@ -239,9 +241,11 @@ class _ShiftRow extends StatelessWidget {
     final ended = shift.endedAt;
 
     return ListTile(
+      // A finished shift is closed-out work, so it gets the same green tick a
+      // closed-out stop does.
       leading: Icon(
-        shift.isActive ? Icons.play_circle : Icons.check_circle_outline,
-        color: shift.isActive ? scheme.primary : scheme.onSurfaceVariant,
+        shift.isActive ? Icons.play_circle : Icons.check_circle,
+        color: shift.isActive ? scheme.primary : context.delivered,
       ),
       title: Row(
         children: [

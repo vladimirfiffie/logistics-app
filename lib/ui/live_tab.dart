@@ -36,6 +36,12 @@ class _LiveTabState extends State<LiveTab> {
 
   /// Seeded from the driver's default in initState rather than hardcoded.
   bool _followDriver = true;
+
+  /// Everything except the map hidden, on a long press. Worth having on a
+  /// phone clamped to a windscreen: the panel and the banner cover about half
+  /// the map, and a driver checking which way the road bends does not need
+  /// either of them.
+  bool _chromeHidden = false;
   bool _backgroundPermissionGranted = true;
   int _seenFixes = 0;
   int _recentreRequests = 0;
@@ -74,6 +80,21 @@ class _LiveTabState extends State<LiveTab> {
     _seenFixes = fixes;
 
     _syncWakelock(tracking.isTracking);
+  }
+
+  /// Long press hides the chrome; long press again brings it back. Announced
+  /// the first time it happens, because a screen that has just emptied itself
+  /// needs to say how to undo that.
+  void _toggleChrome() {
+    AppHaptics.select();
+    setState(() => _chromeHidden = !_chromeHidden);
+    if (!_chromeHidden) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Just the map. Long press again to bring it back.'),
+        duration: Duration(seconds: 3),
+      ),
+    );
   }
 
   /// Jumps the map to the driver and turns following back on.
@@ -223,51 +244,65 @@ class _LiveTabState extends State<LiveTab> {
                   : LatLng(current.latitude, current.longitude),
               followDriver: _followDriver,
               recentreRequest: _recentreRequests,
+              onLongPress: _toggleChrome,
             ),
           ),
 
-          SafeArea(
-            child: Column(
-              children: [
-                _DestinationBanner(
-                  delivery: delivery,
-                  isRecording: tracking.isTracking,
-                ),
-                if (!_backgroundPermissionGranted && tracking.isTracking)
-                  _BackgroundPermissionNudge(
-                    onGrant: () async {
-                      await tracking.requestBackgroundPermission();
-                      await _checkBackgroundPermission();
-                    },
-                    onDismiss: () =>
-                        setState(() => _backgroundPermissionGranted = true),
-                  ),
-                const Spacer(),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: Padding(
-                    padding: const EdgeInsets.only(right: 12, bottom: 8),
-                    child: FloatingActionButton.small(
-                      heroTag: 'follow',
-                      onPressed: () => _recentre(hasFix: current != null),
-                      tooltip: _followDriver
-                          ? 'Recentre'
-                          : 'Follow my position',
-                      child: Icon(
-                        _followDriver ? Icons.gps_fixed : Icons.gps_not_fixed,
+          // Faded rather than removed, and ignoring pointers while hidden, so
+          // the map underneath takes every touch and the panel cannot be
+          // pressed by accident through it.
+          IgnorePointer(
+            ignoring: _chromeHidden,
+            child: AnimatedOpacity(
+              opacity: _chromeHidden ? 0 : 1,
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOut,
+              child: SafeArea(
+                child: Column(
+                  children: [
+                    _DestinationBanner(
+                      delivery: delivery,
+                      isRecording: tracking.isTracking,
+                    ),
+                    if (!_backgroundPermissionGranted && tracking.isTracking)
+                      _BackgroundPermissionNudge(
+                        onGrant: () async {
+                          await tracking.requestBackgroundPermission();
+                          await _checkBackgroundPermission();
+                        },
+                        onDismiss: () =>
+                            setState(() => _backgroundPermissionGranted = true),
+                      ),
+                    const Spacer(),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 12, bottom: 8),
+                        child: FloatingActionButton.small(
+                          heroTag: 'follow',
+                          onPressed: () => _recentre(hasFix: current != null),
+                          tooltip: _followDriver
+                              ? 'Recentre'
+                              : 'Follow my position',
+                          child: Icon(
+                            _followDriver
+                                ? Icons.gps_fixed
+                                : Icons.gps_not_fixed,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
+                    _TripPanel(
+                      tracking: tracking,
+                      delivery: delivery,
+                      slideKey: _slideKey,
+                      onArrived: () => _arrived(delivery),
+                      onFailed: () => failDelivery(context, delivery),
+                      onEndTrip: _stopRecording,
+                    ),
+                  ],
                 ),
-                _TripPanel(
-                  tracking: tracking,
-                  delivery: delivery,
-                  slideKey: _slideKey,
-                  onArrived: () => _arrived(delivery),
-                  onFailed: () => failDelivery(context, delivery),
-                  onEndTrip: _stopRecording,
-                ),
-              ],
+              ),
             ),
           ),
         ],
@@ -285,7 +320,6 @@ class _IdleView extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Live tracking')),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(32),

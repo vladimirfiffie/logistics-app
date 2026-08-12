@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/app_settings.dart';
-import '../models/van_tag.dart';
 import '../services/app_haptics.dart';
 import '../services/nfc_service.dart';
 import '../state/settings_controller.dart';
+import 'nfc_scan_sheet.dart';
 
 /// First-run flow: what the app does, what it records, the choices worth
 /// making up front, and only then the permission prompt.
@@ -364,26 +364,20 @@ class _VanPageState extends State<_VanPage> {
     super.dispose();
   }
 
+  /// Hands the whole thing to the tag sheet, which is where the radar, the
+  /// "hold it there" prompt and the three possible answers live.
   Future<void> _writeTag() async {
     final label = _van.text.trim();
-    final messenger = ScaffoldMessenger.of(context);
     if (label.isEmpty) {
-      messenger.showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Give the van a name first.')),
       );
       return;
     }
 
-    final nfc = context.read<NfcService>();
     setState(() => _writing = true);
-    final problem = await nfc.writeVanTag(VanTag(label: label));
-    if (!mounted) return;
-    setState(() => _writing = false);
-
-    await (problem == null ? AppHaptics.delivered() : AppHaptics.error());
-    messenger.showSnackBar(
-      SnackBar(content: Text(problem ?? 'Tag written for $label.')),
-    );
+    await NfcWriteSheet.show(context, label: label);
+    if (mounted) setState(() => _writing = false);
   }
 
   @override
@@ -446,16 +440,8 @@ class _VanPageState extends State<_VanPage> {
           const SizedBox(height: 10),
           OutlinedButton.icon(
             onPressed: _writing || _van.text.trim().isEmpty ? null : _writeTag,
-            icon: _writing
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.nfc),
-            label: Text(
-              _writing ? 'Hold it against the phone…' : 'Write a tag',
-            ),
+            icon: const Icon(Icons.nfc),
+            label: const Text('Write a tag'),
             style: OutlinedButton.styleFrom(
               minimumSize: const Size.fromHeight(48),
             ),
@@ -473,8 +459,10 @@ class _PreferencesPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final controller = context.watch<SettingsController>();
     final settings = controller.settings;
+    final unit = settings.distanceUnit;
 
     return _Page(
       icon: Icons.tune,
@@ -482,9 +470,9 @@ class _PreferencesPage extends StatelessWidget {
       body: 'Two quick choices. Both live in Settings if you change your mind.',
       children: [
         Text(
-          'DISTANCE',
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: Theme.of(context).colorScheme.primary,
+          'UNITS',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.primary,
             fontWeight: FontWeight.w700,
             letterSpacing: 0.8,
           ),
@@ -492,14 +480,35 @@ class _PreferencesPage extends StatelessWidget {
         const SizedBox(height: 8),
         SegmentedButton<DistanceUnit>(
           segments: [
-            for (final unit in DistanceUnit.values)
-              ButtonSegment(value: unit, label: Text(unit.detail)),
+            for (final option in DistanceUnit.values)
+              ButtonSegment(
+                value: option,
+                icon: Icon(
+                  option == DistanceUnit.metric
+                      ? Icons.straighten
+                      : Icons.square_foot,
+                ),
+                label: Text(option.label),
+              ),
           ],
-          selected: {settings.distanceUnit},
+          selected: {unit},
           onSelectionChanged: (selection) {
             AppHaptics.select();
             controller.setDistanceUnit(selection.first);
           },
+        ),
+        const SizedBox(height: 8),
+        // Says what the choice actually does to the readouts, which "Metric"
+        // on its own does not.
+        Text(
+          'Distances and speeds read in ${unit.detail.toLowerCase()}. '
+          'The weather card follows this too — temperature in '
+          '${settings.usesFahrenheit ? 'Fahrenheit' : 'Celsius'}, wind in '
+          '${settings.resolvedWindUnit.detail} — and each of those can be set '
+          'on its own later.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
         ),
         const SizedBox(height: 20),
         SwitchListTile(

@@ -3,14 +3,24 @@ import 'package:flutter/material.dart';
 /// Distance and speed units. Drivers in the US and UK read miles; the rest of
 /// the world reads kilometres, and getting it wrong makes every readout in the
 /// app useless to them.
+///
+/// Named as the two systems rather than as their distance unit: "Metric" and
+/// "Imperial" is what a driver is looking for when they go hunting for this,
+/// and the units themselves read better as the line underneath.
 enum DistanceUnit {
-  metric('Kilometres', 'km / km-h'),
-  imperial('Miles', 'mi / mph');
+  metric('Metric', 'Kilometres and km/h'),
+  imperial('Imperial', 'Miles and mph');
 
   const DistanceUnit(this.label, this.detail);
 
   final String label;
   final String detail;
+
+  /// The short form, for somewhere there is no room for a sentence.
+  String get shortLabel => switch (this) {
+    DistanceUnit.metric => 'km',
+    DistanceUnit.imperial => 'mi',
+  };
 }
 
 /// Temperature on the weather card.

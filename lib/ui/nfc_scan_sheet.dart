@@ -6,6 +6,7 @@ import '../models/van_tag.dart';
 import '../services/app_haptics.dart';
 import '../services/nfc_service.dart';
 import 'widgets/app_sheet.dart';
+import 'widgets/outcome_colors.dart';
 
 /// What the driver chose from the tag sheet.
 sealed class NfcSheetResult {
@@ -212,6 +213,207 @@ class _NfcScanSheetState extends State<NfcScanSheet> {
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('Cancel'),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Writes a van tag, with the same radar the reader uses.
+///
+/// Writing used to be a list row that flipped to a spinner and then fired a
+/// snackbar, which is a poor way to run something where the driver has to
+/// physically hold a sticker against the back of the phone for a few seconds.
+/// This is the same sheet the clock-on reader gets, and it ends in one of
+/// three plain answers: the tag is ready, this particular tag will never work,
+/// or something went wrong and is worth another go.
+class NfcWriteSheet extends StatefulWidget {
+  const NfcWriteSheet({super.key, required this.label});
+
+  /// The van or round name that goes on the tag.
+  final String label;
+
+  /// Resolves true when a tag was written.
+  static Future<bool?> show(BuildContext context, {required String label}) {
+    return showAppSheet<bool>(
+      context,
+      maxHeightFactor: 0.75,
+      builder: (_) => NfcWriteSheet(label: label),
+    );
+  }
+
+  @override
+  State<NfcWriteSheet> createState() => _NfcWriteSheetState();
+}
+
+class _NfcWriteSheetState extends State<NfcWriteSheet> {
+  late final NfcService _nfc;
+  NfcReadiness? _readiness;
+  NfcWriteResult? _result;
+  bool _writing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _nfc = context.read<NfcService>();
+    _begin();
+  }
+
+  @override
+  void dispose() {
+    _nfc.cancel();
+    super.dispose();
+  }
+
+  Future<void> _begin() async {
+    final readiness = await _nfc.readiness();
+    if (!mounted) return;
+    setState(() => _readiness = readiness);
+    if (readiness != NfcReadiness.ready) return;
+
+    setState(() {
+      _writing = true;
+      _result = null;
+    });
+
+    final result = await _nfc.writeVanTag(VanTag(label: widget.label));
+    if (!mounted) return;
+
+    await (result is NfcWriteDone
+        ? AppHaptics.delivered()
+        : AppHaptics.error());
+    if (!mounted) return;
+    setState(() {
+      _writing = false;
+      _result = result;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final readiness = _readiness;
+    final result = _result;
+    final written = result is NfcWriteDone;
+
+    // Incompatible is not a failure to retry: this tag will refuse again.
+    final retryable =
+        readiness == NfcReadiness.ready &&
+        !written &&
+        result is! NfcWriteIncompatible &&
+        !_writing;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SheetHeader(
+            title: written ? 'Tag ready' : 'Write a van tag',
+            subtitle: written
+                ? null
+                : 'Writes "${widget.label}" onto a blank tag, so tapping it '
+                      'clocks you on.',
+            icon: written ? Icons.check_circle : Icons.nfc,
+          ),
+          const SizedBox(height: 24),
+
+          SizedBox(
+            height: 130,
+            child: Center(
+              child: switch ((readiness, result)) {
+                (null, _) => const CircularProgressIndicator(),
+                (_, NfcWriteDone()) => Icon(
+                  Icons.check_circle,
+                  size: 72,
+                  color: context.delivered,
+                ),
+                (_, NfcWriteIncompatible()) => Icon(
+                  Icons.do_not_disturb_on_outlined,
+                  size: 60,
+                  color: scheme.error,
+                ),
+                (NfcReadiness.ready, _) => _Radar(active: _writing),
+                _ => Icon(
+                  Icons.nfc_outlined,
+                  size: 56,
+                  color: scheme.onSurfaceVariant,
+                ),
+              },
+            ),
+          ),
+
+          const SizedBox(height: 16),
+          Text(
+            switch ((readiness, result, _writing)) {
+              (null, _, _) => 'Checking NFC…',
+              (_, NfcWriteDone(), _) =>
+                'This tag now reads as "${widget.label}". Stick it somewhere '
+                    'you can reach from the driver\'s seat — tapping it starts '
+                    'your shift.',
+              (_, NfcWriteIncompatible(:final reason), _) =>
+                "That tag isn't compatible. $reason",
+              (_, NfcWriteFailed(:final reason), _) => reason,
+              (NfcReadiness.ready, _, true) =>
+                'Hold the back of your phone against the tag and keep it '
+                    'there.',
+              (NfcReadiness.ready, _, false) => 'Ready when you are.',
+              (final NfcReadiness other, _, _) => other.message,
+            },
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: switch (result) {
+                NfcWriteDone() => context.delivered,
+                NfcWriteIncompatible() || NfcWriteFailed() => scheme.error,
+                _ => scheme.onSurfaceVariant,
+              },
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          if (written)
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+              ),
+              child: const Text('Done'),
+            )
+          else ...[
+            if (result is NfcWriteIncompatible)
+              FilledButton.tonalIcon(
+                onPressed: _begin,
+                icon: const Icon(Icons.nfc),
+                label: const Text('Try a different tag'),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(50),
+                ),
+              ),
+            if (retryable)
+              OutlinedButton.icon(
+                onPressed: _begin,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Try again'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(48),
+                ),
+              ),
+            if (readiness == NfcReadiness.disabled)
+              Text(
+                'Turn NFC on in system settings, then try again.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(_writing ? 'Cancel' : 'Close'),
+            ),
+          ],
         ],
       ),
     );

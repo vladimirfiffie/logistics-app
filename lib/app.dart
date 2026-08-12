@@ -111,6 +111,17 @@ class LogisticsApp extends StatelessWidget {
       colorScheme: scheme,
       useMaterial3: true,
       scaffoldBackgroundColor: blackOut ? Colors.black : null,
+      // Material 3 paints a grey bar behind the app bar the moment anything
+      // scrolls under it, which on a list that starts at the top means a slab
+      // of grey appears the instant you drag the page. The screens that keep
+      // an app bar are titles with a back button, not surfaces of their own,
+      // so they stay the same colour as the page all the way down.
+      appBarTheme: AppBarTheme(
+        backgroundColor: blackOut ? Colors.black : scheme.surface,
+        surfaceTintColor: Colors.transparent,
+        scrolledUnderElevation: 0,
+        elevation: 0,
+      ),
       cardTheme: CardThemeData(
         elevation: 0,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'outcome_colors.dart';
+
 /// The tick or cross at the top of the outcome sheet, drawn rather than set as
 /// a static icon.
 ///
@@ -7,31 +9,18 @@ import 'package:flutter/material.dart';
 /// it off, which reads as "this happened just now" in a way a glyph appearing
 /// at full size does not.
 ///
-/// The colours are fixed rather than taken from the scheme. Green means
-/// delivered and red means not, in every accent — pulling `tertiary` here made
-/// a successful drop look orange under Hi-vis and red under Cargo red, which
-/// is worse than not colouring it at all.
+/// The colours come from [OutcomeColors] rather than the scheme, for the reason
+/// set out there.
 class OutcomeMark extends StatefulWidget {
   const OutcomeMark({super.key, required this.failed, this.size = 88});
 
   final bool failed;
   final double size;
 
-  /// Delivered. Readable on both light and dark surfaces.
-  static const success = Color(0xFF2E7D32);
-  static const successDark = Color(0xFF66BB6A);
-
-  static const failure = Color(0xFFC62828);
-  static const failureDark = Color(0xFFEF5350);
-
   static Color colorFor({
     required bool failed,
     required Brightness brightness,
-  }) {
-    final dark = brightness == Brightness.dark;
-    if (failed) return dark ? failureDark : failure;
-    return dark ? successDark : success;
-  }
+  }) => OutcomeColors.markFor(failed: failed, brightness: brightness);
 
   @override
   State<OutcomeMark> createState() => _OutcomeMarkState();

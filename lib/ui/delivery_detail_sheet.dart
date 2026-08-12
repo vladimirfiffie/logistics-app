@@ -17,6 +17,7 @@ import '../state/tracking_controller.dart';
 import 'delivery_actions.dart';
 import 'formatters.dart';
 import 'widgets/app_sheet.dart';
+import 'widgets/outcome_colors.dart';
 import 'widgets/status_chip.dart';
 import 'widgets/trip_map.dart';
 
@@ -453,12 +454,12 @@ class _OutcomeCard extends StatelessWidget {
     final scheme = theme.colorScheme;
     final foreground = failed
         ? scheme.onErrorContainer
-        : scheme.onTertiaryContainer;
+        : context.onDeliveredContainer;
 
     return Card(
       margin: EdgeInsets.zero,
       elevation: 0,
-      color: failed ? scheme.errorContainer : scheme.tertiaryContainer,
+      color: failed ? scheme.errorContainer : context.deliveredContainer,
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(

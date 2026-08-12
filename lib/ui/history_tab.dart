@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
 
 import '../data/delivery_repository.dart';
@@ -8,10 +9,16 @@ import '../state/delivery_controller.dart';
 import '../state/settings_controller.dart';
 import 'delivery_detail_sheet.dart';
 import 'formatters.dart';
-import 'widgets/page_header.dart';
+import 'widgets/outcome_colors.dart';
+import 'widgets/page_top_inset.dart';
 import 'widgets/status_chip.dart';
 
 /// Closed-out stops and the distance recorded getting to them.
+///
+/// Laid out like the home tab rather than like a database table: a headline
+/// card for how the day went, the same mini-stat row, then the stops grouped
+/// by day. A driver comes here to answer "did that one go through?", so the
+/// outcome is the loudest thing on every row.
 class HistoryTab extends StatefulWidget {
   const HistoryTab({super.key});
 
@@ -40,11 +47,26 @@ class _HistoryTabState extends State<HistoryTab> {
       .where((trip) => !trip.isActive)
       .fold(Duration.zero, (sum, trip) => sum + trip.duration);
 
-  Trip? _tripFor(String deliveryId) {
-    for (final trip in _trips) {
-      if (trip.deliveryId == deliveryId) return trip;
-    }
-    return null;
+  /// Built once per load rather than searched per row: the list is O(closed)
+  /// and the old lookup made it O(closed × trips).
+  Map<String, Trip> get _tripsByDelivery => {
+    for (final trip in _trips) trip.deliveryId: trip,
+  };
+
+  /// Midnight on the day [when] falls in — the key the rows group under.
+  static DateTime _dayOf(DateTime when) =>
+      DateTime(when.year, when.month, when.day);
+
+  /// "Today", "Yesterday", or the date. A driver reading this at four in the
+  /// afternoon should not have to work out what today's date is.
+  static String _dayLabel(DateTime day) {
+    final today = _dayOf(DateTime.now());
+    final difference = today.difference(day).inDays;
+    return switch (difference) {
+      0 => 'Today',
+      1 => 'Yesterday',
+      _ => formatDate(day),
+    };
   }
 
   @override
@@ -52,8 +74,33 @@ class _HistoryTabState extends State<HistoryTab> {
     final controller = context.watch<DeliveryController>();
     final closed = controller.closedStops;
     final delivered = closed
-        .where((d) => d.status == DeliveryStatus.delivered)
+        .where((stop) => stop.status == DeliveryStatus.delivered)
         .length;
+    final failed = closed.length - delivered;
+    final trips = _tripsByDelivery;
+
+    // Newest first, and stops with no completion time sink to the bottom
+    // rather than claiming the epoch.
+    final sorted = [...closed]
+      ..sort((a, b) {
+        final left = a.completedAt;
+        final right = b.completedAt;
+        if (left == null || right == null) {
+          return left == null ? (right == null ? 0 : 1) : -1;
+        }
+        return right.compareTo(left);
+      });
+
+    final days = <DateTime, List<Delivery>>{};
+    for (final stop in sorted) {
+      final at = stop.completedAt;
+      if (at == null) continue;
+      days.putIfAbsent(_dayOf(at), () => []).add(stop);
+    }
+    final undated = [
+      for (final stop in sorted)
+        if (stop.completedAt == null) stop,
+    ];
 
     return RefreshIndicator(
       onRefresh: () async {
@@ -61,130 +108,263 @@ class _HistoryTabState extends State<HistoryTab> {
       },
       child: CustomScrollView(
         slivers: [
-          // No actions: "What's new" lives in Settings → About, which is the
-          // one place a driver goes looking for it.
-          const PageHeaderBar('History'),
+          const SliverStatusBarInset(),
 
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: Card(
-                elevation: 0,
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    children: [
-                      _Total(
-                        label: 'Delivered',
-                        value: '$delivered',
-                        of: '${closed.length}',
-                      ),
-                      _Total(
-                        label: 'Distance',
-                        value: formatDistance(
-                          _totalDistance,
-                          unit: context.distanceUnit,
-                        ),
-                      ),
-                      _Total(
-                        label: 'Driving',
-                        value: formatDuration(_totalDriving),
-                      ),
-                    ],
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'History',
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      height: 1.15,
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 4),
+                  Text(
+                    closed.isEmpty
+                        ? 'Nothing closed out yet.'
+                        : '${closed.length} '
+                              '${closed.length == 1 ? 'stop' : 'stops'} closed '
+                              'out',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
-            ),
+            ).animate().fadeIn(duration: 300.ms).moveY(begin: 8),
           ),
+
+          if (closed.isNotEmpty) ...[
+            SliverToBoxAdapter(
+              child: _OutcomeCard(delivered: delivered, failed: failed)
+                  .animate()
+                  .fadeIn(delay: 60.ms, duration: 320.ms)
+                  .moveY(begin: 12),
+            ),
+
+            SliverToBoxAdapter(
+              child:
+                  Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+                        child: Row(
+                          children: [
+                            _MiniStat(
+                              icon: Icons.route_outlined,
+                              label: 'Driven',
+                              value: formatDistance(
+                                _totalDistance,
+                                unit: context.distanceUnit,
+                              ),
+                            ),
+                            _MiniStat(
+                              icon: Icons.timer_outlined,
+                              label: 'Driving',
+                              value: formatDuration(_totalDriving),
+                            ),
+                            _MiniStat(
+                              icon: Icons.local_shipping_outlined,
+                              label: 'Trips',
+                              value: '${_trips.length}',
+                            ),
+                          ],
+                        ),
+                      )
+                      .animate()
+                      .fadeIn(delay: 120.ms, duration: 320.ms)
+                      .moveY(begin: 12),
+            ),
+          ],
 
           if (closed.isEmpty)
             SliverFillRemaining(
               hasScrollBody: false,
               child: Padding(
-                padding: const EdgeInsets.all(32),
+                padding: const EdgeInsets.fromLTRB(32, 0, 32, 64),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(
                       Icons.history,
-                      size: 48,
+                      size: 52,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
-                    const SizedBox(height: 12),
-                    const Text('Nothing closed out yet.'),
+                    const SizedBox(height: 14),
+                    Text(
+                      'Nothing here yet',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Every stop you close out lands here, with the route you '
+                      'drove to get to it.',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
                   ],
                 ),
               ),
             )
           else
-            SliverList.builder(
-              itemCount: closed.length,
-              itemBuilder: (context, index) {
-                final delivery = closed[index];
-                return _HistoryTile(
-                  delivery: delivery,
-                  trip: _tripFor(delivery.id),
-                  onTap: () async {
-                    await showDeliveryDetail(context, delivery.id);
-                    await _loadTrips();
-                  },
-                );
-              },
-            ),
+            for (final entry in [
+              ...days.entries.map((day) => (_dayLabel(day.key), day.value)),
+              if (undated.isNotEmpty) ('No date recorded', undated),
+            ]) ...[
+              SliverToBoxAdapter(
+                child: _DayHeader(label: entry.$1, stops: entry.$2.length),
+              ),
+              SliverList.builder(
+                itemCount: entry.$2.length,
+                itemBuilder: (context, index) {
+                  final delivery = entry.$2[index];
+                  return _HistoryCard(
+                    delivery: delivery,
+                    trip: trips[delivery.id],
+                    onTap: () async {
+                      await showDeliveryDetail(context, delivery.id);
+                      await _loadTrips();
+                    },
+                  );
+                },
+              ),
+            ],
 
-          const SliverToBoxAdapter(child: SizedBox(height: 24)),
+          const SliverToBoxAdapter(child: SizedBox(height: 28)),
         ],
       ),
     );
   }
 }
 
-class _Total extends StatelessWidget {
-  const _Total({required this.label, required this.value, this.of});
+/// How the day actually went, in the two numbers that matter. Green for the
+/// drops that landed, and the failures only get their own half of the card
+/// when there are any — a row of zeroes is not worth the space.
+class _OutcomeCard extends StatelessWidget {
+  const _OutcomeCard({required this.delivered, required this.failed});
 
-  final String label;
-  final String value;
-
-  /// Optional denominator, rendered small next to [value].
-  final String? of;
+  final int delivered;
+  final int failed;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    final scheme = theme.colorScheme;
+    final total = delivered + failed;
+    final rate = total == 0 ? 0.0 : delivered / total;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+      child: Card(
+        elevation: 0,
+        color: context.deliveredContainer,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 76,
+                height: 76,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    TweenAnimationBuilder<double>(
+                      tween: Tween(begin: 0, end: rate),
+                      duration: const Duration(milliseconds: 900),
+                      curve: Curves.easeOutCubic,
+                      builder: (context, value, _) => SizedBox(
+                        width: 76,
+                        height: 76,
+                        child: CircularProgressIndicator(
+                          value: value,
+                          strokeWidth: 8,
+                          backgroundColor: context.onDeliveredContainer
+                              .withValues(alpha: 0.15),
+                          valueColor: AlwaysStoppedAnimation(
+                            context.onDeliveredContainer,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Icon(
+                      Icons.check,
+                      color: context.onDeliveredContainer,
+                      size: 26,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 20),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$delivered delivered',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: context.onDeliveredContainer,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      failed == 0
+                          ? 'Everything closed out went through.'
+                          : '$failed could not be left',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: failed == 0
+                            ? context.onDeliveredContainer.withValues(
+                                alpha: 0.85,
+                              )
+                            : scheme.error,
+                        fontWeight: failed == 0
+                            ? FontWeight.w400
+                            : FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DayHeader extends StatelessWidget {
+  const _DayHeader({required this.label, required this.stops});
+
+  final String label;
+  final int stops;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+      child: Row(
         children: [
           Text(
             label.toUpperCase(),
             style: theme.textTheme.labelSmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              letterSpacing: 0.5,
+              color: theme.colorScheme.primary,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.8,
             ),
           ),
-          const SizedBox(height: 3),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Flexible(
-                child: Text(
-                  value,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (of != null)
-                Text(
-                  ' / $of',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-            ],
+          const Spacer(),
+          Text(
+            '$stops ${stops == 1 ? 'stop' : 'stops'}',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
           ),
         ],
       ),
@@ -192,8 +372,10 @@ class _Total extends StatelessWidget {
   }
 }
 
-class _HistoryTile extends StatelessWidget {
-  const _HistoryTile({
+/// One closed stop, as a card rather than a list row so it sits in the same
+/// language as the manifest.
+class _HistoryCard extends StatelessWidget {
+  const _HistoryCard({
     required this.delivery,
     required this.trip,
     required this.onTap,
@@ -206,41 +388,193 @@ class _HistoryTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final delivered = delivery.status == DeliveryStatus.delivered;
     final completedAt = delivery.completedAt;
+    final recorded = trip;
 
-    return ListTile(
-      onTap: onTap,
-      leading: CircleAvatar(
-        backgroundColor: delivery.status == DeliveryStatus.delivered
-            ? theme.colorScheme.tertiaryContainer
-            : theme.colorScheme.errorContainer,
-        child: Icon(
-          delivery.status == DeliveryStatus.delivered
-              ? Icons.check
-              : Icons.priority_high,
-          size: 20,
-          color: delivery.status == DeliveryStatus.delivered
-              ? theme.colorScheme.onTertiaryContainer
-              : theme.colorScheme.onErrorContainer,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: Card(
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(color: scheme.outlineVariant),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: delivered
+                      ? context.deliveredContainer
+                      : scheme.errorContainer,
+                  child: Icon(
+                    delivered ? Icons.check : Icons.priority_high,
+                    size: 20,
+                    color: delivered
+                        ? context.onDeliveredContainer
+                        : scheme.onErrorContainer,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              delivery.customerName,
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          StatusChip(delivery.status, dense: true),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        delivery.address,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          _Fact(icon: Icons.tag, text: delivery.reference),
+                          if (completedAt != null)
+                            _Fact(
+                              icon: Icons.check_circle_outline,
+                              text: formatTime(completedAt),
+                            ),
+                          if (recorded != null)
+                            _Fact(
+                              icon: Icons.route_outlined,
+                              text: formatDistance(
+                                recorded.distanceMeters,
+                                unit: context.distanceUnit,
+                              ),
+                            ),
+                        ],
+                      ),
+                      if (delivery.recipientName case final String name)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Text(
+                            'Received by $name',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      if (delivery.failureReason case final String reason)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Text(
+                            reason,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.error,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
-      title: Text(
-        delivery.customerName,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+    );
+  }
+}
+
+/// One icon-and-value pair on a history card.
+class _Fact extends StatelessWidget {
+  const _Fact({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(right: 14),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 4),
+          Text(
+            text,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
       ),
-      subtitle: Text(
-        [
-          delivery.reference,
-          if (completedAt != null) formatTime(completedAt),
-          if (trip != null)
-            formatDistance(trip!.distanceMeters, unit: context.distanceUnit),
-          if (delivery.failureReason case final String reason) reason,
-        ].join(' · '),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+    );
+  }
+}
+
+/// The same three-across stat row the home tab uses, so the two screens read
+/// as the same app.
+class _MiniStat extends StatelessWidget {
+  const _MiniStat({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          Text(
+            label.toUpperCase(),
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ],
       ),
-      trailing: StatusChip(delivery.status, dense: true),
     );
   }
 }

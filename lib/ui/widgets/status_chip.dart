@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../../models/delivery.dart';
+import 'outcome_colors.dart';
 
 /// Colour-coded status pill. Colours are derived from the theme so the chip
-/// stays legible in both light and dark mode.
+/// stays legible in both light and dark mode — except delivered, which is the
+/// fixed green from [OutcomeColors] so a closed-out stop reads the same under
+/// every accent.
 class StatusChip extends StatelessWidget {
   const StatusChip(this.status, {super.key, this.dense = false});
 
@@ -25,8 +28,8 @@ class StatusChip extends StatelessWidget {
         Icons.local_shipping,
       ),
       DeliveryStatus.delivered => (
-        scheme.tertiaryContainer,
-        scheme.onTertiaryContainer,
+        context.deliveredContainer,
+        context.onDeliveredContainer,
         Icons.check_circle,
       ),
       DeliveryStatus.failed => (
