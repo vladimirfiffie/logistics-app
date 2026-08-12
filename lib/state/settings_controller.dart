@@ -22,11 +22,21 @@ class SettingsController extends ChangeNotifier {
   SettingsController();
 
   static const _themeKey = 'settings.theme';
+  static const _accentKey = 'settings.accent';
+  static const _amoledKey = 'settings.amoled';
   static const _unitKey = 'settings.distance_unit';
   static const _hapticsKey = 'settings.haptics_enabled';
   static const _keepScreenOnKey = 'settings.keep_screen_on';
   static const _accuracyKey = 'settings.tracking_accuracy';
   static const _slideKey = 'settings.confirm_with_slide';
+  static const _driverNameKey = 'settings.driver_name';
+  static const _vehicleKey = 'settings.vehicle_label';
+  static const _followKey = 'settings.follow_mode';
+  static const _celebrateKey = 'settings.celebrate_deliveries';
+  static const _requirePhotoKey = 'settings.require_proof_photo';
+  static const _arrivalAlertsKey = 'settings.arrival_alerts';
+  static const _arrivalRadiusKey = 'settings.arrival_radius_meters';
+  static const _weatherKey = 'settings.show_weather';
 
   AppSettings _settings = const AppSettings();
   bool _isLoaded = false;
@@ -42,6 +52,12 @@ class SettingsController extends ChangeNotifier {
         ThemeChoice.values,
         ThemeChoice.system,
       ),
+      accent: _readEnum(
+        prefs.getString(_accentKey),
+        AccentColor.values,
+        AccentColor.fleet,
+      ),
+      amoled: prefs.getBool(_amoledKey) ?? false,
       distanceUnit: _readEnum(
         prefs.getString(_unitKey),
         DistanceUnit.values,
@@ -55,6 +71,18 @@ class SettingsController extends ChangeNotifier {
         TrackingAccuracy.balanced,
       ),
       confirmWithSlide: prefs.getBool(_slideKey) ?? true,
+      driverName: prefs.getString(_driverNameKey) ?? '',
+      vehicleLabel: prefs.getString(_vehicleKey) ?? '',
+      followMode: _readEnum(
+        prefs.getString(_followKey),
+        MapFollowMode.values,
+        MapFollowMode.follow,
+      ),
+      celebrateDeliveries: prefs.getBool(_celebrateKey) ?? true,
+      requireProofPhoto: prefs.getBool(_requirePhotoKey) ?? false,
+      arrivalAlerts: prefs.getBool(_arrivalAlertsKey) ?? true,
+      arrivalRadiusMeters: prefs.getInt(_arrivalRadiusKey) ?? 150,
+      showWeather: prefs.getBool(_weatherKey) ?? true,
     );
     _isLoaded = true;
     _syncHaptics();
@@ -64,6 +92,18 @@ class SettingsController extends ChangeNotifier {
   Future<void> setTheme(ThemeChoice value) async {
     await _update(_settings.copyWith(theme: value), (prefs) {
       return prefs.setString(_themeKey, value.name);
+    });
+  }
+
+  Future<void> setAccent(AccentColor value) async {
+    await _update(_settings.copyWith(accent: value), (prefs) {
+      return prefs.setString(_accentKey, value.name);
+    });
+  }
+
+  Future<void> setAmoled(bool value) async {
+    await _update(_settings.copyWith(amoled: value), (prefs) {
+      return prefs.setBool(_amoledKey, value);
     });
   }
 
@@ -97,16 +137,76 @@ class SettingsController extends ChangeNotifier {
     });
   }
 
+  Future<void> setDriverName(String value) async {
+    final trimmed = value.trim();
+    await _update(_settings.copyWith(driverName: trimmed), (prefs) {
+      return prefs.setString(_driverNameKey, trimmed);
+    });
+  }
+
+  Future<void> setVehicleLabel(String value) async {
+    final trimmed = value.trim();
+    await _update(_settings.copyWith(vehicleLabel: trimmed), (prefs) {
+      return prefs.setString(_vehicleKey, trimmed);
+    });
+  }
+
+  Future<void> setFollowMode(MapFollowMode value) async {
+    await _update(_settings.copyWith(followMode: value), (prefs) {
+      return prefs.setString(_followKey, value.name);
+    });
+  }
+
+  Future<void> setCelebrateDeliveries(bool value) async {
+    await _update(_settings.copyWith(celebrateDeliveries: value), (prefs) {
+      return prefs.setBool(_celebrateKey, value);
+    });
+  }
+
+  Future<void> setRequireProofPhoto(bool value) async {
+    await _update(_settings.copyWith(requireProofPhoto: value), (prefs) {
+      return prefs.setBool(_requirePhotoKey, value);
+    });
+  }
+
+  Future<void> setArrivalAlerts(bool value) async {
+    await _update(_settings.copyWith(arrivalAlerts: value), (prefs) {
+      return prefs.setBool(_arrivalAlertsKey, value);
+    });
+  }
+
+  Future<void> setArrivalRadius(int meters) async {
+    await _update(_settings.copyWith(arrivalRadiusMeters: meters), (prefs) {
+      return prefs.setInt(_arrivalRadiusKey, meters);
+    });
+  }
+
+  Future<void> setShowWeather(bool value) async {
+    await _update(_settings.copyWith(showWeather: value), (prefs) {
+      return prefs.setBool(_weatherKey, value);
+    });
+  }
+
   /// Puts everything back to defaults.
   Future<void> resetToDefaults() async {
     final prefs = await SharedPreferences.getInstance();
     for (final key in const [
       _themeKey,
+      _accentKey,
+      _amoledKey,
       _unitKey,
       _hapticsKey,
       _keepScreenOnKey,
       _accuracyKey,
       _slideKey,
+      _driverNameKey,
+      _vehicleKey,
+      _followKey,
+      _celebrateKey,
+      _requirePhotoKey,
+      _arrivalAlertsKey,
+      _arrivalRadiusKey,
+      _weatherKey,
     ]) {
       await prefs.remove(key);
     }

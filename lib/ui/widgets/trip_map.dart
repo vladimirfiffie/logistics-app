@@ -15,6 +15,7 @@ class TripMap extends StatefulWidget {
     this.trail = const [],
     this.current,
     this.followDriver = true,
+    this.recentreRequest = 0,
     this.interactive = true,
   });
 
@@ -29,6 +30,13 @@ class TripMap extends StatefulWidget {
 
   /// Keep the camera centred on [current] as new fixes arrive.
   final bool followDriver;
+
+  /// Bump this to recentre right now, without waiting for the next fix.
+  ///
+  /// Needed because the position stream only emits after the driver has moved
+  /// the distance filter — so a stationary driver tapping "my location" would
+  /// otherwise sit there watching nothing happen.
+  final int recentreRequest;
 
   final bool interactive;
 

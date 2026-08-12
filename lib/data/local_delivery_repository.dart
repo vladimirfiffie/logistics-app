@@ -117,6 +117,27 @@ class LocalDeliveryRepository implements DeliveryRepository {
   }
 
   @override
+  Future<int> deleteClosedDeliveries() async {
+    // Trips and breadcrumbs go with them via ON DELETE CASCADE.
+    return _db.delete(
+      'deliveries',
+      where: 'status IN (?, ?)',
+      whereArgs: [DeliveryStatus.delivered.name, DeliveryStatus.failed.name],
+    );
+  }
+
+  @override
+  Future<void> deleteEverything() async {
+    await _db.transaction((txn) async {
+      // Explicit rather than relying on cascade, so this still empties the
+      // tables if a row was ever orphaned.
+      await txn.delete('trip_points');
+      await txn.delete('trips');
+      await txn.delete('deliveries');
+    });
+  }
+
+  @override
   Future<Trip> endTrip(String tripId, {required double distanceMeters}) async {
     final endedAt = DateTime.now();
     await _db.update(

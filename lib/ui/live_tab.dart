@@ -34,6 +34,12 @@ class _LiveTabState extends State<LiveTab> {
   bool _followDriver = true;
   bool _backgroundPermissionGranted = true;
   int _seenFixes = 0;
+  int _recentreRequests = 0;
+
+  /// Lets us re-arm the slide handle when the driver backs out of the
+  /// completion sheet. Without this the handle stays latched at the end after
+  /// a successful slide and the stop can never be completed again.
+  final _slideKey = GlobalKey<SlideToConfirmState>();
   bool _wakelockOn = false;
   TrackingController? _tracking;
 
@@ -61,6 +67,33 @@ class _LiveTabState extends State<LiveTab> {
     _seenFixes = fixes;
 
     _syncWakelock(tracking.isTracking);
+  }
+
+  /// Jumps the map to the driver and turns following back on.
+  ///
+  /// Always recentres rather than only toggling: someone who has panned away
+  /// and taps the location button wants to be taken back, not to change a
+  /// mode.
+  void _recentre({required bool hasFix}) {
+    AppHaptics.select();
+    if (!hasFix) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Waiting for the first GPS fix…')),
+      );
+      return;
+    }
+    setState(() {
+      _followDriver = true;
+      _recentreRequests++;
+    });
+  }
+
+  /// Completing can be abandoned — the driver may cancel the sheet, or be
+  /// blocked by the "proof photo required" setting. Either way the slide has
+  /// already latched, so it has to be put back.
+  Future<void> _arrived(Delivery delivery) async {
+    final closed = await completeDelivery(context, delivery);
+    if (!closed) _slideKey.currentState?.reset();
   }
 
   void _syncWakelock(bool isTracking) {
@@ -111,6 +144,7 @@ class _LiveTabState extends State<LiveTab> {
                   ? null
                   : LatLng(current.latitude, current.longitude),
               followDriver: _followDriver,
+              recentreRequest: _recentreRequests,
             ),
           ),
 
@@ -137,10 +171,9 @@ class _LiveTabState extends State<LiveTab> {
                     padding: const EdgeInsets.only(right: 12, bottom: 8),
                     child: FloatingActionButton.small(
                       heroTag: 'follow',
-                      onPressed: () =>
-                          setState(() => _followDriver = !_followDriver),
+                      onPressed: () => _recentre(hasFix: current != null),
                       tooltip: _followDriver
-                          ? 'Stop following'
+                          ? 'Recentre'
                           : 'Follow my position',
                       child: Icon(
                         _followDriver ? Icons.gps_fixed : Icons.gps_not_fixed,
@@ -151,7 +184,8 @@ class _LiveTabState extends State<LiveTab> {
                 _TripPanel(
                   tracking: tracking,
                   delivery: delivery,
-                  onArrived: () => completeDelivery(context, delivery),
+                  slideKey: _slideKey,
+                  onArrived: () => _arrived(delivery),
                   onFailed: () => failDelivery(context, delivery),
                   onEndTrip: tracking.stop,
                 ),
@@ -320,6 +354,7 @@ class _TripPanel extends StatelessWidget {
   const _TripPanel({
     required this.tracking,
     required this.delivery,
+    required this.slideKey,
     required this.onArrived,
     required this.onFailed,
     required this.onEndTrip,
@@ -327,6 +362,7 @@ class _TripPanel extends StatelessWidget {
 
   final TrackingController tracking;
   final Delivery delivery;
+  final GlobalKey<SlideToConfirmState> slideKey;
   final VoidCallback onArrived;
   final VoidCallback onFailed;
   final Future<void> Function() onEndTrip;
@@ -442,6 +478,7 @@ class _TripPanel extends StatelessWidget {
             // default is a deliberate slide.
             if (context.appSettings.confirmWithSlide)
               SlideToConfirm(
+                key: slideKey,
                 label: 'Slide when you have arrived',
                 onConfirmed: tracking.isBusy ? () {} : onArrived,
                 trackColor: theme.colorScheme.surfaceContainerHighest,

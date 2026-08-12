@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
+import '../data/delivery_repository.dart';
+import '../data/seed_data.dart';
 import '../models/app_settings.dart';
 import '../release_notes.dart';
 import '../services/app_haptics.dart';
 import '../services/location_service.dart';
+import '../services/notification_service.dart';
+import '../state/delivery_controller.dart';
 import '../state/settings_controller.dart';
 import '../state/tracking_controller.dart';
 import 'whats_new_sheet.dart';
@@ -73,6 +78,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
             labelOf: (choice) => choice.label,
             onChanged: controller.setTheme,
           ),
+          _ChoiceTile<AccentColor>(
+            icon: Icons.palette_outlined,
+            title: 'Accent colour',
+            value: settings.accent,
+            valueLabel: settings.accent.label,
+            options: AccentColor.values,
+            labelOf: (accent) => accent.label,
+            onChanged: controller.setAccent,
+          ),
+          SwitchListTile(
+            secondary: const Icon(Icons.contrast),
+            title: const Text('AMOLED black'),
+            subtitle: const Text(
+              'True black in dark mode. Saves power on an OLED screen.',
+            ),
+            value: settings.amoled,
+            onChanged: (value) {
+              AppHaptics.select();
+              controller.setAmoled(value);
+            },
+          ),
           _ChoiceTile<DistanceUnit>(
             icon: Icons.straighten,
             title: 'Units',
@@ -82,6 +108,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
             labelOf: (unit) => unit.label,
             detailOf: (unit) => unit.detail,
             onChanged: controller.setDistanceUnit,
+          ),
+
+          const _SectionHeader('Driver'),
+          _TextTile(
+            icon: Icons.badge_outlined,
+            title: 'Your name',
+            value: settings.driverName,
+            hint: 'Used to greet you on the home screen',
+            onChanged: controller.setDriverName,
+          ),
+          _TextTile(
+            icon: Icons.local_shipping_outlined,
+            title: 'Van or round',
+            value: settings.vehicleLabel,
+            hint: 'e.g. LT21 KXR, or Round 4',
+            onChanged: controller.setVehicleLabel,
           ),
 
           const _SectionHeader('Tracking'),
@@ -124,6 +166,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
             },
           ),
 
+          _ChoiceTile<MapFollowMode>(
+            icon: Icons.map_outlined,
+            title: 'Map behaviour',
+            value: settings.followMode,
+            valueLabel: settings.followMode.label,
+            options: MapFollowMode.values,
+            labelOf: (mode) => mode.label,
+            detailOf: (mode) => mode.detail,
+            onChanged: controller.setFollowMode,
+          ),
+          SwitchListTile(
+            secondary: const Icon(Icons.photo_camera_outlined),
+            title: const Text('Require a proof photo'),
+            subtitle: const Text('Will not let a stop be closed without one.'),
+            value: settings.requireProofPhoto,
+            onChanged: (value) {
+              AppHaptics.select();
+              controller.setRequireProofPhoto(value);
+            },
+          ),
+
+          const _SectionHeader('Notifications'),
+          SwitchListTile(
+            secondary: const Icon(Icons.notifications_active_outlined),
+            title: const Text('Arrival alerts'),
+            subtitle: Text(
+              'Tell me when I get within '
+              '${settings.arrivalRadiusMeters}m of a stop.',
+            ),
+            value: settings.arrivalAlerts,
+            onChanged: (value) async {
+              AppHaptics.select();
+              await controller.setArrivalAlerts(value);
+              if (value) await NotificationService().requestPermission();
+            },
+          ),
+          if (settings.arrivalAlerts)
+            _ChoiceTile<int>(
+              icon: Icons.adjust,
+              title: 'Arrival radius',
+              value: settings.arrivalRadiusMeters,
+              valueLabel: '${settings.arrivalRadiusMeters} m',
+              options: const [50, 100, 150, 300, 500],
+              labelOf: (meters) => '$meters m',
+              detailOf: (meters) => switch (meters) {
+                50 => 'At the door. Can be missed in a built-up area.',
+                100 => 'Tight.',
+                150 => 'The right street. Recommended.',
+                300 => 'A little early — useful on fast roads.',
+                _ => 'Well ahead of the stop.',
+              },
+              onChanged: controller.setArrivalRadius,
+            ),
+
           const _SectionHeader('Feedback'),
           SwitchListTile(
             secondary: const Icon(Icons.vibration),
@@ -138,11 +234,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
             },
           ),
 
+          SwitchListTile(
+            secondary: const Icon(Icons.celebration_outlined),
+            title: const Text('Celebrate deliveries'),
+            subtitle: const Text('Show the summary after closing a stop.'),
+            value: settings.celebrateDeliveries,
+            onChanged: (value) {
+              AppHaptics.select();
+              controller.setCelebrateDeliveries(value);
+            },
+          ),
+
+          const _SectionHeader('Weather'),
+          SwitchListTile(
+            secondary: const Icon(Icons.wb_cloudy_outlined),
+            title: const Text('Show driving conditions'),
+            subtitle: const Text(
+              'The only feature that leaves the device: it sends your rough '
+              'position to Open-Meteo to fetch the forecast.',
+            ),
+            isThreeLine: true,
+            value: settings.showWeather,
+            onChanged: (value) {
+              AppHaptics.select();
+              controller.setShowWeather(value);
+            },
+          ),
+
           const _SectionHeader('Permissions'),
           _PermissionTile(
             readiness: _readiness,
             backgroundGranted: _backgroundGranted,
             onRefresh: _refreshPermissions,
+          ),
+
+          const _SectionHeader('Data'),
+          ListTile(
+            leading: const Icon(Icons.cleaning_services_outlined),
+            title: const Text('Clear history'),
+            subtitle: const Text(
+              'Removes closed stops and their recorded routes. Open stops '
+              'are kept.',
+            ),
+            isThreeLine: true,
+            onTap: _clearHistory,
+          ),
+          ListTile(
+            leading: const Icon(Icons.restart_alt_outlined),
+            title: const Text('Start a fresh day'),
+            subtitle: const Text(
+              'Wipes everything and seeds a new manifest around you.',
+            ),
+            onTap: isTracking ? null : _startFreshDay,
+            enabled: !isTracking,
           ),
 
           const _SectionHeader('About'),
@@ -182,6 +326,110 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
+  }
+
+  /// Both data actions are destructive and irreversible, so both go through
+  /// an explicit confirmation naming exactly what goes.
+  Future<void> _clearHistory() async {
+    final repository = context.read<DeliveryRepository>();
+    final deliveries = context.read<DeliveryController>();
+
+    final confirmed = await _confirmDestructive(
+      title: 'Clear history?',
+      detail:
+          'Closed stops, their recorded routes and their proof photos are '
+          'deleted from this device. Stops still to do are untouched.',
+      action: 'Clear',
+    );
+    if (!confirmed) return;
+
+    final removed = await repository.deleteClosedDeliveries();
+    await deliveries.refresh();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          removed == 0
+              ? 'Nothing to clear.'
+              : 'Cleared $removed closed '
+                    '${removed == 1 ? 'stop' : 'stops'}.',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _startFreshDay() async {
+    final repository = context.read<DeliveryRepository>();
+    final deliveries = context.read<DeliveryController>();
+    final location = context.read<LocationService>();
+
+    final confirmed = await _confirmDestructive(
+      title: 'Start a fresh day?',
+      detail:
+          'Every stop, route and photo currently on this device is deleted, '
+          'and a new manifest is generated around your position.',
+      action: 'Start fresh',
+    );
+    if (!confirmed) return;
+
+    await repository.deleteEverything();
+
+    LatLng? origin;
+    try {
+      if (await location.currentReadiness() == LocationReadiness.ready) {
+        final fix = await location.lastKnownPosition();
+        if (fix != null) origin = LatLng(fix.latitude, fix.longitude);
+      }
+    } catch (_) {
+      // Seeds against the fallback origin instead.
+    }
+
+    await SeedData.ensureSeeded(repository, origin: origin);
+    await deliveries.load();
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('New day seeded.')));
+  }
+
+  Future<bool> _confirmDestructive({
+    required String title,
+    required String detail,
+    required String action,
+  }) async {
+    final scheme = Theme.of(context).colorScheme;
+    final confirmed = await showAppSheet<bool>(
+      context,
+      builder: (sheetContext) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SheetHeader(
+              title: title,
+              subtitle: detail,
+              icon: Icons.warning_amber_rounded,
+            ),
+            const SizedBox(height: 22),
+            FilledButton(
+              onPressed: () => Navigator.of(sheetContext).pop(true),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+                backgroundColor: scheme.error,
+                foregroundColor: scheme.onError,
+              ),
+              child: Text(action),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(sheetContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
+      ),
+    );
+    return confirmed ?? false;
   }
 
   Future<void> _confirmReset(SettingsController controller) async {
@@ -226,6 +474,86 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ).showSnackBar(const SnackBar(content: Text('Settings reset')));
       }
     }
+  }
+}
+
+/// A settings row backed by a short free-text value.
+class _TextTile extends StatelessWidget {
+  const _TextTile({
+    required this.icon,
+    required this.title,
+    required this.value,
+    required this.hint,
+    required this.onChanged,
+  });
+
+  final IconData icon;
+  final String title;
+  final String value;
+  final String hint;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ListTile(
+      leading: Icon(icon),
+      title: Text(title),
+      subtitle: Text(
+        value.isEmpty ? 'Not set' : value,
+        style: value.isEmpty
+            ? theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontStyle: FontStyle.italic,
+              )
+            : null,
+      ),
+      trailing: const Icon(Icons.edit_outlined, size: 18),
+      onTap: () => _edit(context),
+    );
+  }
+
+  Future<void> _edit(BuildContext context) async {
+    final controller = TextEditingController(text: value);
+    final result = await showAppSheet<String>(
+      context,
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          24,
+          0,
+          24,
+          24 + MediaQuery.viewInsetsOf(sheetContext).bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SheetHeader(title: title, icon: icon),
+            const SizedBox(height: 18),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+              decoration: InputDecoration(
+                hintText: hint,
+                border: const OutlineInputBorder(),
+              ),
+              onSubmitted: (text) => Navigator.of(sheetContext).pop(text),
+            ),
+            const SizedBox(height: 18),
+            FilledButton(
+              onPressed: () => Navigator.of(sheetContext).pop(controller.text),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+              ),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    controller.dispose();
+    if (result != null) onChanged(result);
   }
 }
 

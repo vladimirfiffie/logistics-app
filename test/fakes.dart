@@ -81,6 +81,33 @@ class FakeDeliveryRepository implements DeliveryRepository {
       points.where((point) => point.tripId == tripId).toList();
 
   @override
+  Future<int> deleteClosedDeliveries() async {
+    final closed = deliveries.values
+        .where((delivery) => !delivery.status.isOpen)
+        .map((delivery) => delivery.id)
+        .toList();
+    for (final id in closed) {
+      deliveries.remove(id);
+      final tripIds = trips.values
+          .where((trip) => trip.deliveryId == id)
+          .map((trip) => trip.id)
+          .toList();
+      for (final tripId in tripIds) {
+        trips.remove(tripId);
+        points.removeWhere((point) => point.tripId == tripId);
+      }
+    }
+    return closed.length;
+  }
+
+  @override
+  Future<void> deleteEverything() async {
+    deliveries.clear();
+    trips.clear();
+    points.clear();
+  }
+
+  @override
   Future<Trip> endTrip(String tripId, {required double distanceMeters}) async {
     final trip = trips[tripId];
     if (trip == null) throw StateError('No such trip');

@@ -9,6 +9,7 @@ import '../models/delivery.dart';
 import '../models/trip.dart';
 import '../models/trip_point.dart';
 import '../services/location_service.dart';
+import '../services/notification_service.dart';
 
 /// Drives the live tracking session: permissions, the position stream, the
 /// breadcrumb trail, and the running odometer.
@@ -16,18 +17,25 @@ class TrackingController extends ChangeNotifier {
   TrackingController({
     required DeliveryRepository repository,
     required LocationService locationService,
-    required TrackingAccuracy Function() accuracy,
+    required AppSettings Function() settings,
+    NotificationService? notifications,
     this.onManifestChanged,
   }) : _repository = repository,
        _location = locationService,
-       _accuracy = accuracy;
+       _settings = settings,
+       _notifications = notifications ?? NotificationService();
 
   final DeliveryRepository _repository;
   final LocationService _location;
 
   /// Read lazily rather than captured, so a trip started after the driver
-  /// changes the setting uses the new value without rewiring providers.
-  final TrackingAccuracy Function() _accuracy;
+  /// changes a setting uses the new value without rewiring providers.
+  final AppSettings Function() _settings;
+
+  final NotificationService _notifications;
+
+  /// Arrival fires once per trip, not once per fix inside the radius.
+  bool _announcedArrival = false;
 
   /// Called when a start/stop changes a delivery's status, so the manifest
   /// list can re-read it.
@@ -124,6 +132,8 @@ class TrackingController extends ChangeNotifier {
       _points = const [];
       _distanceMeters = 0;
       _lastPosition = null;
+      _announcedArrival = false;
+      await _notifications.cancelArrival();
       _listen();
       await onManifestChanged?.call();
       return true;
@@ -191,7 +201,7 @@ class TrackingController extends ChangeNotifier {
     _subscription = _location
         .trackPosition(
           notificationText: 'On the way to $label',
-          accuracy: _accuracy(),
+          accuracy: _settings().accuracy,
         )
         .listen(
           _onPosition,
@@ -224,6 +234,8 @@ class TrackingController extends ChangeNotifier {
     _lastPosition = position;
     notifyListeners();
 
+    await _maybeAnnounceArrival();
+
     try {
       await _repository.appendPoint(point);
     } catch (error) {
@@ -232,6 +244,29 @@ class TrackingController extends ChangeNotifier {
       _error = error;
       notifyListeners();
     }
+  }
+
+  /// Tells the driver they have arrived, once, when they come inside the
+  /// configured radius. The phone is usually showing a nav app rather than
+  /// this one, so a notification is the only way this lands.
+  Future<void> _maybeAnnounceArrival() async {
+    if (_announcedArrival) return;
+    final settings = _settings();
+    if (!settings.arrivalAlerts) return;
+
+    final stop = _delivery;
+    final distance = metersToDestination;
+    if (stop == null || distance == null) return;
+    if (distance > settings.arrivalRadiusMeters) return;
+
+    // Set before awaiting: a burst of fixes inside the radius must not queue
+    // up several notifications.
+    _announcedArrival = true;
+    await _notifications.showArrival(
+      reference: stop.reference,
+      customerName: stop.customerName,
+      address: stop.address,
+    );
   }
 
   double _measureTrail(List<TripPoint> trail) {

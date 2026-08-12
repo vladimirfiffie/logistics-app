@@ -51,8 +51,15 @@ final releaseNotes = <ReleaseNote>[
       'Close out a stop with the recipient name and a photo, or record why it '
           'could not be delivered.',
       'Sort the day by time slot or by which stop is nearest.',
+      'Get a notification when you come within range of a stop, so you do '
+          'not miss it while your nav app is on screen.',
+      'A home screen with the day at a glance: progress, distance driven, '
+          'what is next, and driving conditions.',
       'History keeps every closed stop with the distance and time it took.',
-      'Everything stays on the device. Nothing is uploaded.',
+      'Themes, accent colours, an AMOLED black mode, miles or kilometres, '
+          'haptics and GPS accuracy are all yours to set.',
+      'Your stops, routes and photos never leave the phone. The weather card '
+          'is the one exception, and it can be switched off.',
     ],
   ),
 ];

@@ -5,11 +5,18 @@ the day's manifest, start the trip, and the app tracks your route in the
 background, keeping a running distance and time against that stop until you
 close it out with a name and a photo.
 
-Everything is stored on the device in SQLite. There is no backend and nothing
-is uploaded.
+Delivery data is stored on the device in SQLite. There is no backend for your
+stops, routes or photos.
+
+Two features do use the network: map tiles come from OpenStreetMap (which sees
+requests for images, not your position), and the optional weather card sends
+your approximate position to Open-Meteo. That card can be switched off in
+Settings.
 
 ## What's in it
 
+- **Home** — the day at a glance: progress ring, distance driven, what's next,
+  and driving conditions with a warning for ice, fog, snow or strong wind.
 - **Manifest** — the day's stops, sortable by time slot or by how far away
   they are, with a live "GPS locked" indicator and parcel counts.
 - **Live tracking** — an OpenStreetMap view with your breadcrumb trail, the
@@ -18,8 +25,13 @@ is uploaded.
 - **Proof of delivery** — recipient name plus an optional photo, copied out of
   the camera cache into app storage so it survives a cache purge.
 - **Failed stops** — a reason is recorded from a preset list or free text.
+- **Arrival alerts** — a notification when you come within a set radius of the
+  stop, because the phone is usually showing a nav app rather than this one.
 - **History** — closed stops with the distance and time recorded getting to
   each one, and totals for the day.
+- **Settings** — theme, accent colour, AMOLED black, miles or kilometres,
+  GPS accuracy preset, keep-screen-on, slide-to-confirm, haptics, arrival
+  alerts, proof-photo enforcement, permissions, and data clearing.
 
 ## Running it
 
@@ -39,7 +51,8 @@ instead. The seed only ever runs against an empty database.
 lib/
   models/       Delivery, Trip, TripPoint — plain data + map serialisation
   data/         DeliveryRepository (interface) and its SQLite implementation
-  services/     LocationService — the only place geolocator is touched
+  services/     LocationService (the only place geolocator is touched),
+                NotificationService, WeatherService, AppHaptics
   state/        DeliveryController, TrackingController (ChangeNotifier)
   ui/           screens, shared widgets, formatters
 ```

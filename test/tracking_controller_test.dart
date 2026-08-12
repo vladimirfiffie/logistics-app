@@ -12,17 +12,17 @@ void main() {
   late FakeLocationService location;
   late TrackingController controller;
   late int manifestRefreshes;
-  late TrackingAccuracy accuracy;
+  late AppSettings settings;
 
   setUp(() {
     repository = FakeDeliveryRepository();
     location = FakeLocationService();
     manifestRefreshes = 0;
-    accuracy = TrackingAccuracy.balanced;
+    settings = const AppSettings();
     controller = TrackingController(
       repository: repository,
       locationService: location,
-      accuracy: () => accuracy,
+      settings: () => settings,
       onManifestChanged: () async => manifestRefreshes++,
     );
   });
@@ -60,7 +60,7 @@ void main() {
       await repository.saveDelivery(delivery);
       // Changed after the controller was built — a trip started now must use
       // the new value.
-      accuracy = TrackingAccuracy.saver;
+      settings = const AppSettings(accuracy: TrackingAccuracy.saver);
 
       await controller.start(delivery);
 

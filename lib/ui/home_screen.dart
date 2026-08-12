@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../state/tracking_controller.dart';
 import 'history_tab.dart';
+import 'home_tab.dart';
 import 'live_tab.dart';
 import 'manifest_tab.dart';
 
@@ -15,10 +16,11 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  static const _manifestTab = 0;
-  static const _liveTab = 1;
+  static const _homeTab = 0;
+  static const _manifestTab = 1;
+  static const _liveTab = 2;
 
-  int _index = _manifestTab;
+  int _index = _homeTab;
 
   void _goTo(int index) => setState(() => _index = index);
 
@@ -34,6 +36,11 @@ class _HomeScreenState extends State<HomeScreen> {
       body: IndexedStack(
         index: _index,
         children: [
+          HomeTab(
+            onTrackingStarted: () => _goTo(_liveTab),
+            onBrowseManifest: () => _goTo(_manifestTab),
+            onOpenLive: () => _goTo(_liveTab),
+          ),
           ManifestTab(onTrackingStarted: () => _goTo(_liveTab)),
           LiveTab(onBrowseManifest: () => _goTo(_manifestTab)),
           const HistoryTab(),
@@ -43,6 +50,11 @@ class _HomeScreenState extends State<HomeScreen> {
         selectedIndex: _index,
         onDestinationSelected: _goTo,
         destinations: [
+          const NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home),
+            label: 'Home',
+          ),
           const NavigationDestination(
             icon: Icon(Icons.list_alt_outlined),
             selectedIcon: Icon(Icons.list_alt),

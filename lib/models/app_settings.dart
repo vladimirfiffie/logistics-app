@@ -74,20 +74,64 @@ enum TrackingAccuracy {
   Duration get interval => Duration(seconds: intervalSeconds);
 }
 
+/// Accent colours. Named for the trade rather than the hex value — a driver
+/// picking a theme is not thinking in Material seed colours.
+enum AccentColor {
+  fleet('Fleet blue', Color(0xFF1565C0)),
+  hiVis('Hi-vis', Color(0xFFF57F17)),
+  depot('Depot green', Color(0xFF2E7D32)),
+  cargo('Cargo red', Color(0xFFC62828)),
+  night('Night violet', Color(0xFF5E35B1)),
+  steel('Steel', Color(0xFF455A64));
+
+  const AccentColor(this.label, this.seed);
+
+  final String label;
+  final Color seed;
+}
+
+/// How the live map behaves by default when a trip starts.
+enum MapFollowMode {
+  follow('Follow me', 'Keep the map centred on your position.'),
+  free('Free', 'Leave the map where you put it.');
+
+  const MapFollowMode(this.label, this.detail);
+
+  final String label;
+  final String detail;
+}
+
 /// Everything the driver can change. Immutable; [copyWith] produces the next
 /// value and the controller persists it.
 @immutable
 class AppSettings {
   const AppSettings({
     this.theme = ThemeChoice.system,
+    this.accent = AccentColor.fleet,
+    this.amoled = false,
     this.distanceUnit = DistanceUnit.metric,
     this.hapticsEnabled = true,
     this.keepScreenOn = false,
     this.accuracy = TrackingAccuracy.balanced,
     this.confirmWithSlide = true,
+    this.driverName = '',
+    this.vehicleLabel = '',
+    this.followMode = MapFollowMode.follow,
+    this.celebrateDeliveries = true,
+    this.requireProofPhoto = false,
+    this.arrivalAlerts = true,
+    this.arrivalRadiusMeters = 150,
+    this.showWeather = true,
   });
 
   final ThemeChoice theme;
+  final AccentColor accent;
+
+  /// Pure-black surfaces in dark mode. On an OLED screen the pixels are
+  /// genuinely off, which is a real battery saving on a phone that spends all
+  /// day on a windscreen mount.
+  final bool amoled;
+
   final DistanceUnit distanceUnit;
   final bool hapticsEnabled;
 
@@ -102,39 +146,113 @@ class AppSettings {
   /// the wrong stop is annoying to undo.
   final bool confirmWithSlide;
 
+  /// Shown on the home tab. Empty means "no greeting by name".
+  final String driverName;
+
+  /// Van or round identifier, e.g. "LT21 KXR" or "Round 4". Shown on the home
+  /// tab so the driver can tell at a glance they opened the right thing.
+  final String vehicleLabel;
+
+  /// Whether the live map starts out following the driver.
+  final MapFollowMode followMode;
+
+  /// Show the success animation after a delivery. On by default, but it is a
+  /// couple of seconds a driver doing eighty drops a day may not want.
+  final bool celebrateDeliveries;
+
+  /// Block completing a stop until a photo has been taken. Off by default —
+  /// it is a depot policy, not a universal one.
+  final bool requireProofPhoto;
+
+  /// Notify when the driver comes within [arrivalRadiusMeters] of the stop.
+  /// Worth having on: the phone is usually showing a nav app, not this one.
+  final bool arrivalAlerts;
+
+  /// Fires once per trip. 150m is roughly "the right street" rather than "the
+  /// right door" — tight enough to be useful, loose enough that a GPS wobble
+  /// in a built-up area does not miss it entirely.
+  final int arrivalRadiusMeters;
+
+  /// Driving conditions on the home tab.
+  ///
+  /// The only feature that sends anything off the device: fetching it means
+  /// giving Open-Meteo the driver's approximate position. Rounded to three
+  /// decimals (about 100m) and switchable for exactly that reason.
+  final bool showWeather;
+
   AppSettings copyWith({
     ThemeChoice? theme,
+    AccentColor? accent,
+    bool? amoled,
     DistanceUnit? distanceUnit,
     bool? hapticsEnabled,
     bool? keepScreenOn,
     TrackingAccuracy? accuracy,
     bool? confirmWithSlide,
+    String? driverName,
+    String? vehicleLabel,
+    MapFollowMode? followMode,
+    bool? celebrateDeliveries,
+    bool? requireProofPhoto,
+    bool? arrivalAlerts,
+    int? arrivalRadiusMeters,
+    bool? showWeather,
   }) => AppSettings(
     theme: theme ?? this.theme,
+    accent: accent ?? this.accent,
+    amoled: amoled ?? this.amoled,
     distanceUnit: distanceUnit ?? this.distanceUnit,
     hapticsEnabled: hapticsEnabled ?? this.hapticsEnabled,
     keepScreenOn: keepScreenOn ?? this.keepScreenOn,
     accuracy: accuracy ?? this.accuracy,
     confirmWithSlide: confirmWithSlide ?? this.confirmWithSlide,
+    driverName: driverName ?? this.driverName,
+    vehicleLabel: vehicleLabel ?? this.vehicleLabel,
+    followMode: followMode ?? this.followMode,
+    celebrateDeliveries: celebrateDeliveries ?? this.celebrateDeliveries,
+    requireProofPhoto: requireProofPhoto ?? this.requireProofPhoto,
+    arrivalAlerts: arrivalAlerts ?? this.arrivalAlerts,
+    arrivalRadiusMeters: arrivalRadiusMeters ?? this.arrivalRadiusMeters,
+    showWeather: showWeather ?? this.showWeather,
   );
 
   @override
   bool operator ==(Object other) =>
       other is AppSettings &&
       other.theme == theme &&
+      other.accent == accent &&
+      other.amoled == amoled &&
       other.distanceUnit == distanceUnit &&
       other.hapticsEnabled == hapticsEnabled &&
       other.keepScreenOn == keepScreenOn &&
       other.accuracy == accuracy &&
-      other.confirmWithSlide == confirmWithSlide;
+      other.confirmWithSlide == confirmWithSlide &&
+      other.driverName == driverName &&
+      other.vehicleLabel == vehicleLabel &&
+      other.followMode == followMode &&
+      other.celebrateDeliveries == celebrateDeliveries &&
+      other.requireProofPhoto == requireProofPhoto &&
+      other.arrivalAlerts == arrivalAlerts &&
+      other.arrivalRadiusMeters == arrivalRadiusMeters &&
+      other.showWeather == showWeather;
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     theme,
+    accent,
+    amoled,
     distanceUnit,
     hapticsEnabled,
     keepScreenOn,
     accuracy,
     confirmWithSlide,
-  );
+    driverName,
+    vehicleLabel,
+    followMode,
+    celebrateDeliveries,
+    requireProofPhoto,
+    arrivalAlerts,
+    arrivalRadiusMeters,
+    showWeather,
+  ]);
 }

@@ -33,4 +33,13 @@ abstract interface class DeliveryRepository {
 
   /// Closes the session and stamps the final odometer reading.
   Future<Trip> endTrip(String tripId, {required double distanceMeters});
+
+  /// Removes closed-out stops and everything recorded against them. Open
+  /// stops are left alone, so this can be run mid-round. Returns how many
+  /// went.
+  Future<int> deleteClosedDeliveries();
+
+  /// Wipes every delivery, trip and breadcrumb. Used by "start a new day",
+  /// which then re-seeds a fresh manifest.
+  Future<void> deleteEverything();
 }

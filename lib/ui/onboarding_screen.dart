@@ -297,15 +297,19 @@ class _PrivacyPage extends StatelessWidget {
       children: [
         _Point(
           icon: Icons.cloud_off,
-          title: 'No uploads',
-          detail: 'There is no server. Nothing leaves the device.',
+          title: 'No delivery data is uploaded',
+          detail:
+              'There is no server for your stops, routes or photos. They are '
+              'only ever written to this phone.',
         ),
         _Point(
-          icon: Icons.map_outlined,
-          title: 'Maps are the exception',
+          icon: Icons.public,
+          title: 'Two things do use the network',
           detail:
-              'Map tiles are fetched from OpenStreetMap, which means it asks '
-              'for map images — never your position.',
+              'Map tiles come from OpenStreetMap, which asks for images and '
+              'not your position. The weather card does send your rough '
+              'location — switch it off in Settings if you would rather it '
+              'did not.',
         ),
         _Point(
           icon: Icons.delete_outline,
