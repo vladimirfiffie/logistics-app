@@ -113,8 +113,29 @@ and wire it into the `release` block per
 Losing this file means losing the ability to update the app on Play, so back
 it up somewhere that isn't this repo.
 
-## CI
+## CI and releases
 
 `.github/workflows/build.yml` runs on every push and PR: format check,
 `flutter analyze --fatal-infos`, `flutter test`, then a debug APK uploaded as
-an artifact. No secrets required, because nothing there is release-signed.
+an artifact. No secrets required.
+
+Pushing a `v*` tag additionally builds release APKs **split per ABI** and
+publishes them as a GitHub **prerelease**:
+
+```sh
+git tag v1.0.0-beta.2
+git push origin v1.0.0-beta.2
+```
+
+Three files are attached — `arm64-v8a` (almost every phone since ~2017),
+`armeabi-v7a` (older 32-bit devices) and `x86_64` (emulators). Splitting
+avoids shipping all three architectures' native code to every device, which
+is most of the download for a Flutter app. Installing the wrong one fails
+with `INSTALL_FAILED_NO_MATCHING_ABIS`.
+
+Every tag is marked prerelease deliberately: until a real upload keystore
+exists, those APKs are debug-signed and sideload-only. Wire up signing as
+described above before cutting anything that calls itself a stable release.
+
+The release job uses the built-in `GITHUB_TOKEN`, so there is nothing to
+configure.
