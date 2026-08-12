@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/app_settings.dart';
 import '../services/app_haptics.dart';
+import '../ui/formatters.dart';
 
 /// Sugar for the settings a widget needs mid-build, so call sites read
 /// `formatDistance(x, unit: context.distanceUnit)` rather than three lines of
@@ -37,6 +38,10 @@ class SettingsController extends ChangeNotifier {
   static const _arrivalAlertsKey = 'settings.arrival_alerts';
   static const _arrivalRadiusKey = 'settings.arrival_radius_meters';
   static const _weatherKey = 'settings.show_weather';
+  static const _temperatureKey = 'settings.temperature_unit';
+  static const _dateStyleKey = 'settings.date_style';
+  static const _clockStyleKey = 'settings.clock_style';
+  static const _nfcClockOnKey = 'settings.nfc_clock_on';
 
   AppSettings _settings = const AppSettings();
   bool _isLoaded = false;
@@ -83,9 +88,25 @@ class SettingsController extends ChangeNotifier {
       arrivalAlerts: prefs.getBool(_arrivalAlertsKey) ?? true,
       arrivalRadiusMeters: prefs.getInt(_arrivalRadiusKey) ?? 150,
       showWeather: prefs.getBool(_weatherKey) ?? true,
+      temperatureUnit: _readEnum(
+        prefs.getString(_temperatureKey),
+        TemperatureUnit.values,
+        TemperatureUnit.matchUnits,
+      ),
+      dateStyle: _readEnum(
+        prefs.getString(_dateStyleKey),
+        DateStyle.values,
+        DateStyle.dayMonth,
+      ),
+      clockStyle: _readEnum(
+        prefs.getString(_clockStyleKey),
+        ClockStyle.values,
+        ClockStyle.twentyFour,
+      ),
+      nfcClockOn: prefs.getBool(_nfcClockOnKey) ?? true,
     );
     _isLoaded = true;
-    _syncHaptics();
+    _syncMirrors();
     notifyListeners();
   }
 
@@ -187,6 +208,30 @@ class SettingsController extends ChangeNotifier {
     });
   }
 
+  Future<void> setTemperatureUnit(TemperatureUnit value) async {
+    await _update(_settings.copyWith(temperatureUnit: value), (prefs) {
+      return prefs.setString(_temperatureKey, value.name);
+    });
+  }
+
+  Future<void> setDateStyle(DateStyle value) async {
+    await _update(_settings.copyWith(dateStyle: value), (prefs) {
+      return prefs.setString(_dateStyleKey, value.name);
+    });
+  }
+
+  Future<void> setClockStyle(ClockStyle value) async {
+    await _update(_settings.copyWith(clockStyle: value), (prefs) {
+      return prefs.setString(_clockStyleKey, value.name);
+    });
+  }
+
+  Future<void> setNfcClockOn(bool value) async {
+    await _update(_settings.copyWith(nfcClockOn: value), (prefs) {
+      return prefs.setBool(_nfcClockOnKey, value);
+    });
+  }
+
   /// Puts everything back to defaults.
   Future<void> resetToDefaults() async {
     final prefs = await SharedPreferences.getInstance();
@@ -207,11 +252,15 @@ class SettingsController extends ChangeNotifier {
       _arrivalAlertsKey,
       _arrivalRadiusKey,
       _weatherKey,
+      _temperatureKey,
+      _dateStyleKey,
+      _clockStyleKey,
+      _nfcClockOnKey,
     ]) {
       await prefs.remove(key);
     }
     _settings = const AppSettings();
-    _syncHaptics();
+    _syncMirrors();
     notifyListeners();
   }
 
@@ -221,15 +270,20 @@ class SettingsController extends ChangeNotifier {
   ) async {
     if (next == _settings) return;
     _settings = next;
-    _syncHaptics();
+    _syncMirrors();
     notifyListeners();
     await write(await SharedPreferences.getInstance());
   }
 
-  /// AppHaptics is called from places that have no easy access to a provider
-  /// (plain functions in delivery_actions.dart), so the flag is mirrored onto
-  /// it rather than threaded through every call.
-  void _syncHaptics() => AppHaptics.enabled = _settings.hapticsEnabled;
+  /// Haptics and the date formatters are reached from places that have no easy
+  /// access to a provider — plain functions in delivery_actions.dart, and
+  /// `formatDate` called from every list row — so those two settings are
+  /// mirrored onto them rather than threaded through every call.
+  void _syncMirrors() {
+    AppHaptics.enabled = _settings.hapticsEnabled;
+    DateFormatting.date = _settings.dateStyle;
+    DateFormatting.clock = _settings.clockStyle;
+  }
 
   static T _readEnum<T extends Enum>(String? name, List<T> values, T fallback) {
     if (name == null) return fallback;

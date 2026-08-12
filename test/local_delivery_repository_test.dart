@@ -145,6 +145,68 @@ void main() {
     expect(await repository.activeTrip(), isNull);
   });
 
+  test('ending a trip releases the stop back to pending', () async {
+    await repository.saveDelivery(_stop('1'));
+    final trip = await repository.startTrip('1');
+    expect(
+      (await repository.fetchDelivery('1'))!.status,
+      DeliveryStatus.inTransit,
+    );
+
+    await repository.endTrip(trip.id, distanceMeters: 100);
+
+    // Otherwise the stop reads "In transit" on the manifest for the rest of
+    // the day with nothing recording behind it.
+    expect(
+      (await repository.fetchDelivery('1'))!.status,
+      DeliveryStatus.pending,
+    );
+  });
+
+  test('closing out a stop keeps its recorded trip and trail', () async {
+    await repository.saveDelivery(_stop('1'));
+    final trip = await repository.startTrip('1');
+    await repository.appendPoint(
+      _point(trip.id, lat: 51.50, lng: -0.12, at: DateTime(2026, 8, 11, 9)),
+    );
+    await repository.endTrip(trip.id, distanceMeters: 4200);
+
+    // Exactly what completeDelivery does after ending the trip. Saved with
+    // INSERT OR REPLACE this cascaded the trip and its breadcrumbs away, so
+    // every finished stop lost the distance it had just recorded.
+    await repository.saveDelivery(
+      (await repository.fetchDelivery(
+        '1',
+      ))!.copyWith(status: DeliveryStatus.delivered, recipientName: 'Sam'),
+    );
+
+    expect(await repository.fetchTrips(), hasLength(1));
+    expect((await repository.tripForDelivery('1'))!.distanceMeters, 4200);
+    expect(await repository.pointsForTrip(trip.id), hasLength(1));
+    expect(
+      (await repository.fetchDelivery('1'))!.recipientName,
+      'Sam',
+      reason: 'the update still has to land',
+    );
+  });
+
+  test('ending a trip leaves a stop that was already closed out', () async {
+    await repository.saveDelivery(_stop('1'));
+    final trip = await repository.startTrip('1');
+    // The order completeDelivery uses: close the trip, then write the
+    // outcome. Re-ending must not resurrect a delivered stop.
+    await repository.saveDelivery(
+      _stop('1').copyWith(status: DeliveryStatus.delivered),
+    );
+
+    await repository.endTrip(trip.id, distanceMeters: 100);
+
+    expect(
+      (await repository.fetchDelivery('1'))!.status,
+      DeliveryStatus.delivered,
+    );
+  });
+
   test('breadcrumbs read back in the order they were recorded', () async {
     await repository.saveDelivery(_stop('1'));
     final trip = await repository.startTrip('1');

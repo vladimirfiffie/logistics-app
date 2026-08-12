@@ -36,11 +36,21 @@ class LocalDeliveryRepository implements DeliveryRepository {
 
   @override
   Future<void> saveDelivery(Delivery delivery) async {
-    await _db.insert(
-      'deliveries',
-      delivery.toMap(),
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    // Update-then-insert rather than INSERT OR REPLACE. SQLite implements
+    // REPLACE as a delete followed by an insert, which fires
+    // `trips.delivery_id ... ON DELETE CASCADE` — so re-saving a stop to mark
+    // it delivered was silently taking its recorded trip and every breadcrumb
+    // with it.
+    final row = delivery.toMap();
+    await _db.transaction((txn) async {
+      final updated = await txn.update(
+        'deliveries',
+        row,
+        where: 'id = ?',
+        whereArgs: [delivery.id],
+      );
+      if (updated == 0) await txn.insert('deliveries', row);
+    });
   }
 
   @override
@@ -196,23 +206,44 @@ class LocalDeliveryRepository implements DeliveryRepository {
   @override
   Future<Trip> endTrip(String tripId, {required double distanceMeters}) async {
     final endedAt = DateTime.now();
-    await _db.update(
-      'trips',
-      {
-        'ended_at': endedAt.toUtc().millisecondsSinceEpoch,
-        'distance_meters': distanceMeters,
-      },
-      where: 'id = ?',
-      whereArgs: [tripId],
-    );
 
-    final rows = await _db.query(
-      'trips',
-      where: 'id = ?',
-      whereArgs: [tripId],
-      limit: 1,
-    );
-    if (rows.isEmpty) throw StateError('Trip $tripId no longer exists.');
+    // Ending the trip has to release the stop as well. `startTrip` moves it to
+    // inTransit, and nothing else moves it back — so without this the stop
+    // stays "In transit" on the manifest for the rest of the day even though
+    // no recording is running. Delivered and failed stops are left alone:
+    // those are closed outcomes written after the trip ended.
+    final rows = await _db.transaction((txn) async {
+      await txn.update(
+        'trips',
+        {
+          'ended_at': endedAt.toUtc().millisecondsSinceEpoch,
+          'distance_meters': distanceMeters,
+        },
+        where: 'id = ?',
+        whereArgs: [tripId],
+      );
+
+      final found = await txn.query(
+        'trips',
+        where: 'id = ?',
+        whereArgs: [tripId],
+        limit: 1,
+      );
+      if (found.isEmpty) throw StateError('Trip $tripId no longer exists.');
+
+      await txn.update(
+        'deliveries',
+        {'status': DeliveryStatus.pending.name},
+        where: 'id = ? AND status = ?',
+        whereArgs: [
+          found.first['delivery_id'] as String,
+          DeliveryStatus.inTransit.name,
+        ],
+      );
+
+      return found;
+    });
+
     return Trip.fromMap(rows.first);
   }
 }

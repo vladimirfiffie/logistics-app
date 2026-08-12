@@ -18,6 +18,7 @@ import 'delivery_detail_sheet.dart';
 import 'nfc_scan_sheet.dart';
 import 'formatters.dart';
 import 'settings_screen.dart';
+import 'widgets/app_sheet.dart';
 import 'widgets/status_chip.dart';
 
 /// The at-a-glance screen: how the day is going, what is next, and one tap to
@@ -50,39 +51,127 @@ class _HomeTabState extends State<HomeTab> {
     _loadWeather();
   }
 
-  /// Clocking on offers the tag as a shortcut and never requires it — the
-  /// sheet always carries a "start without a tag" button, so a phone with no
-  /// NFC or a van with no sticker is not a dead end.
   Future<void> _toggleShift() async {
     final shifts = context.read<ShiftController>();
+    // A second tap while the first write is in flight would clock on twice.
+    if (shifts.isBusy) return;
+    if (shifts.isOnShift) {
+      await _clockOff(shifts);
+    } else {
+      await _clockOn(shifts);
+    }
+  }
+
+  /// Clocking on offers the tag as a shortcut and never requires it — the
+  /// sheet always carries a "start without a tag" button, so a phone with no
+  /// NFC or a van with no sticker is not a dead end. Drivers who will never
+  /// use a tag can turn the prompt off entirely in Settings.
+  Future<void> _clockOn(ShiftController shifts) async {
     final settings = context.read<SettingsController>().settings;
 
-    if (shifts.isOnShift) {
-      await shifts.end();
-      await AppHaptics.trackingStopped();
-      return;
+    var vehicle = settings.vehicleLabel.isEmpty ? null : settings.vehicleLabel;
+    var startedByTag = false;
+
+    if (settings.nfcClockOn) {
+      final result = await NfcScanSheet.show(
+        context,
+        title: 'Start your shift',
+        subtitle: 'Tap the tag in your van, or start without one.',
+        manualLabel: 'Start without a tag',
+      );
+      if (result == null || !mounted) return;
+      if (result case NfcSheetTag(:final tag)) {
+        vehicle = tag.label;
+        startedByTag = true;
+      }
     }
-
-    final result = await NfcScanSheet.show(
-      context,
-      title: 'Start your shift',
-      subtitle: 'Tap the tag in your van, or start without one.',
-      manualLabel: 'Start without a tag',
-    );
-    if (result == null || !mounted) return;
-
-    final vehicle = switch (result) {
-      NfcSheetTag(:final tag) => tag.label,
-      NfcSheetManual() =>
-        settings.vehicleLabel.isEmpty ? null : settings.vehicleLabel,
-    };
 
     final started = await shifts.start(
       vehicleLabel: vehicle,
-      startedByTag: result is NfcSheetTag,
+      startedByTag: startedByTag,
     );
-    if (started != null) await AppHaptics.trackingStarted();
+    if (!mounted) return;
+
+    // A failed clock-on used to be completely silent: the button did nothing
+    // and the card stayed on "Not on shift".
+    if (started == null) {
+      await AppHaptics.error();
+      if (mounted) _say('Could not clock on. ${shifts.error ?? ''}'.trim());
+      return;
+    }
+
+    await AppHaptics.trackingStarted();
+    if (!mounted) return;
+    _say(
+      'Clocked on at ${formatTime(started.startedAt)}'
+      '${vehicle == null ? '' : ' · $vehicle'}.',
+    );
   }
+
+  /// Clocking off is the end of the driver's paid day, and it is one tap away
+  /// from a button they press all morning — so it confirms, and it says what
+  /// it is about to do to a trip that is still recording.
+  Future<void> _clockOff(ShiftController shifts) async {
+    final tracking = context.read<TrackingController>();
+    final wasRecording = tracking.isTracking;
+    final worked = formatDuration(shifts.elapsed);
+
+    final confirmed = await showAppSheet<bool>(
+      context,
+      builder: (sheetContext) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SheetHeader(
+              title: 'Clock off?',
+              subtitle: wasRecording
+                  ? "You've been on shift for $worked. A trip is still "
+                        'recording — clocking off stops it and puts that stop '
+                        'back on the manifest.'
+                  : "You've been on shift for $worked.",
+              icon: Icons.logout,
+            ),
+            const SizedBox(height: 22),
+            FilledButton(
+              onPressed: () => Navigator.of(sheetContext).pop(true),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+              ),
+              child: const Text('Clock off'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(sheetContext).pop(false),
+              child: const Text('Stay on shift'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    // Leaving the GPS recording after the driver has finished their day is a
+    // privacy problem, not just an untidy one.
+    if (wasRecording) await tracking.stop();
+
+    final finished = await shifts.end();
+    if (!mounted) return;
+
+    if (finished == null) {
+      await AppHaptics.error();
+      if (mounted) _say('Could not clock off. ${shifts.error ?? ''}'.trim());
+      return;
+    }
+
+    await AppHaptics.trackingStopped();
+    if (!mounted) return;
+    _say('Clocked off · ${formatDuration(finished.duration)} on shift.');
+  }
+
+  void _say(String message) => ScaffoldMessenger.of(
+    context,
+  ).showSnackBar(SnackBar(content: Text(message)));
 
   /// Best-effort. Uses the cached fix rather than requesting a fresh one — a
   /// weather card is not worth waking the GPS for, and it must never prompt
@@ -175,17 +264,7 @@ class _HomeTabState extends State<HomeTab> {
       },
       child: CustomScrollView(
         slivers: [
-          SliverAppBar.large(
-            title: const Text('Home'),
-            actions: [
-              IconButton(
-                onPressed: () => SettingsScreen.show(context),
-                icon: const Icon(Icons.settings_outlined),
-                tooltip: 'Settings',
-              ),
-              const SizedBox(width: 4),
-            ],
-          ),
+          const SliverAppBar.large(title: Text('Home')),
 
           SliverToBoxAdapter(
             child: Padding(
@@ -214,19 +293,30 @@ class _HomeTabState extends State<HomeTab> {
             ).animate().fadeIn(duration: 300.ms).moveY(begin: 8),
           ),
 
+          SliverToBoxAdapter(
+            child: _DriverTile(
+              name: settings.driverName,
+              vehicleLabel: settings.vehicleLabel,
+              onOpenSettings: () => SettingsScreen.show(context),
+            ).animate().fadeIn(delay: 20.ms, duration: 300.ms),
+          ),
+
           if (settings.showWeather && (_weather != null || _loadingWeather))
             SliverToBoxAdapter(
               child: _WeatherCard(
                 weather: _weather,
                 unit: unit,
-                isLoading: _loadingWeather,
+                fahrenheit: settings.usesFahrenheit,
               ).animate().fadeIn(delay: 60.ms, duration: 320.ms),
             ),
 
+          // Consumer rather than a watch up in this build method: the shift
+          // clock ticks every second, and only this card needs to redraw for
+          // it.
           SliverToBoxAdapter(
-            child: _ShiftCard(
-              shifts: context.watch<ShiftController>(),
-              onToggle: _toggleShift,
+            child: Consumer<ShiftController>(
+              builder: (context, shifts, _) =>
+                  _ShiftCard(shifts: shifts, onToggle: _toggleShift),
             ).animate().fadeIn(delay: 40.ms, duration: 300.ms),
           ),
 
@@ -461,6 +551,89 @@ class _ProgressCard extends StatelessWidget {
   }
 }
 
+/// The way into Settings, and the only one — the gear icon that used to sit in
+/// every app bar is gone. A row that names the driver and the van earns its
+/// place on the screen in a way a bare icon does not, and it doubles as the
+/// prompt to fill those two fields in when they are still empty.
+class _DriverTile extends StatelessWidget {
+  const _DriverTile({
+    required this.name,
+    required this.vehicleLabel,
+    required this.onOpenSettings,
+  });
+
+  final String name;
+  final String vehicleLabel;
+  final VoidCallback onOpenSettings;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final identified = [
+      if (name.isNotEmpty) name,
+      if (vehicleLabel.isNotEmpty) vehicleLabel,
+    ].join(' · ');
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+      child: Card(
+        elevation: 0,
+        color: scheme.surfaceContainerHighest,
+        child: InkWell(
+          onTap: () {
+            AppHaptics.select();
+            onOpenSettings();
+          },
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: scheme.primaryContainer,
+                  child: Icon(
+                    Icons.person_outline,
+                    size: 20,
+                    color: scheme.onPrimaryContainer,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        identified.isEmpty ? 'Set up your details' : identified,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        identified.isEmpty
+                            ? 'Your name, van, units and everything else'
+                            : 'Settings and preferences',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Clock on and off. Shown above everything else because it is the first and
 /// last thing a driver does, and because "am I on the clock?" should never
 /// need looking for.
@@ -552,26 +725,15 @@ class _WeatherCard extends StatelessWidget {
   const _WeatherCard({
     required this.weather,
     required this.unit,
-    required this.isLoading,
+    required this.fahrenheit,
   });
 
   final Weather? weather;
   final DistanceUnit unit;
-  final bool isLoading;
 
-  String _temperature(double celsius) {
-    if (unit == DistanceUnit.imperial) {
-      return '${(celsius * 9 / 5 + 32).round()}°F';
-    }
-    return '${celsius.round()}°C';
-  }
-
-  String _wind(double kph) {
-    if (unit == DistanceUnit.imperial) {
-      return '${(kph / 1.609344).round()} mph wind';
-    }
-    return '${kph.round()} km/h wind';
-  }
+  /// Resolved by [AppSettings.usesFahrenheit], so "match my units" is already
+  /// decided by the time it reaches the card.
+  final bool fahrenheit;
 
   @override
   Widget build(BuildContext context) {
@@ -620,7 +782,10 @@ class _WeatherCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 12),
                   Text(
-                    _temperature(current.temperatureC),
+                    formatTemperature(
+                      current.temperatureC,
+                      fahrenheit: fahrenheit,
+                    ),
                     style: theme.textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w700,
                       color: warning == null ? null : scheme.onErrorContainer,
@@ -630,7 +795,8 @@ class _WeatherCard extends StatelessWidget {
                   Expanded(
                     child: Text(
                       '${current.description} · '
-                      '${_wind(current.windKph)}',
+                      '${formatWindSpeed(current.windKph, unit: unit)} wind · '
+                      'feels ${formatTemperature(current.feelsLikeC, fahrenheit: fahrenheit)}',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: warning == null
                             ? scheme.onSurfaceVariant

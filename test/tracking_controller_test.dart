@@ -185,6 +185,33 @@ void main() {
       expect(controller.points, hasLength(2));
     });
 
+    test('releases the stop so it is no longer in transit', () async {
+      final delivery = makeDelivery();
+      await repository.saveDelivery(delivery);
+      await controller.start(delivery);
+      expect(repository.deliveries['d1']!.status, DeliveryStatus.inTransit);
+
+      await controller.stop();
+
+      // "Stop recording" that leaves the stop in transit is the bug that
+      // makes stopping look like it never happened.
+      expect(repository.deliveries['d1']!.status, DeliveryStatus.pending);
+      expect(controller.isTracking, isFalse);
+    });
+
+    test('a later trip can announce arrival again', () async {
+      final delivery = makeDelivery();
+      await repository.saveDelivery(delivery);
+      await controller.start(delivery);
+      await controller.stop();
+      controller.clear();
+
+      // The arrival latch is per-trip; a stop that did not reset it would
+      // silence the alert for the rest of the day.
+      final restarted = await controller.start(delivery);
+      expect(restarted, isTrue);
+    });
+
     test('clear() only drops a finished trip', () async {
       final delivery = makeDelivery();
       await repository.saveDelivery(delivery);

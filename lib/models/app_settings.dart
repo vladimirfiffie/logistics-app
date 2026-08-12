@@ -13,6 +13,50 @@ enum DistanceUnit {
   final String detail;
 }
 
+/// Temperature on the weather card.
+///
+/// [matchUnits] keeps it tied to [DistanceUnit] — the common case, since a
+/// driver reading miles is usually reading Fahrenheit. The explicit values
+/// exist because that pairing is not universal: the UK reads miles and
+/// Celsius.
+enum TemperatureUnit {
+  matchUnits('Match my units', 'Celsius with km, Fahrenheit with miles'),
+  celsius('Celsius', 'Always °C'),
+  fahrenheit('Fahrenheit', 'Always °F');
+
+  const TemperatureUnit(this.label, this.detail);
+
+  final String label;
+  final String detail;
+}
+
+/// How a date reads across the app. The pattern is fed straight to `intl`.
+enum DateStyle {
+  dayMonth('Wed 12 Aug', 'EEE d MMM'),
+  dayMonthYear('12 Aug 2026', 'd MMM yyyy'),
+  numericDmy('12/08/2026', 'dd/MM/yyyy'),
+  numericMdy('08/12/2026', 'MM/dd/yyyy'),
+  iso('2026-08-12', 'yyyy-MM-dd');
+
+  const DateStyle(this.label, this.pattern);
+
+  /// Doubles as the example shown in the picker — the label *is* the format.
+  final String label;
+
+  final String pattern;
+}
+
+enum ClockStyle {
+  twentyFour('24-hour', 'HH:mm', '17:45'),
+  twelveHour('12-hour', 'h:mm a', '5:45 PM');
+
+  const ClockStyle(this.label, this.pattern, this.example);
+
+  final String label;
+  final String pattern;
+  final String example;
+}
+
 enum ThemeChoice {
   system('Follow system', Icons.brightness_auto_outlined),
   light('Light', Icons.light_mode_outlined),
@@ -122,6 +166,10 @@ class AppSettings {
     this.arrivalAlerts = true,
     this.arrivalRadiusMeters = 150,
     this.showWeather = true,
+    this.temperatureUnit = TemperatureUnit.matchUnits,
+    this.dateStyle = DateStyle.dayMonth,
+    this.clockStyle = ClockStyle.twentyFour,
+    this.nfcClockOn = true,
   });
 
   final ThemeChoice theme;
@@ -180,6 +228,30 @@ class AppSettings {
   /// decimals (about 100m) and switchable for exactly that reason.
   final bool showWeather;
 
+  /// Temperature on the weather card. Separate from [distanceUnit] because
+  /// the two do not always pair the way you would expect.
+  final TemperatureUnit temperatureUnit;
+
+  /// How dates read everywhere in the app.
+  final DateStyle dateStyle;
+
+  /// 24- or 12-hour clock. Delivery slots are the most-read text in the app,
+  /// so reading them in the wrong convention is a genuine nuisance.
+  final ClockStyle clockStyle;
+
+  /// Offer the van tag when clocking on. Switched off, the button clocks on
+  /// straight away — the right behaviour on a phone with no NFC, or for a
+  /// driver who never stuck a tag in the van.
+  final bool nfcClockOn;
+
+  /// Which unit the weather card should actually render, with
+  /// [TemperatureUnit.matchUnits] resolved against [distanceUnit].
+  bool get usesFahrenheit => switch (temperatureUnit) {
+    TemperatureUnit.celsius => false,
+    TemperatureUnit.fahrenheit => true,
+    TemperatureUnit.matchUnits => distanceUnit == DistanceUnit.imperial,
+  };
+
   AppSettings copyWith({
     ThemeChoice? theme,
     AccentColor? accent,
@@ -197,6 +269,10 @@ class AppSettings {
     bool? arrivalAlerts,
     int? arrivalRadiusMeters,
     bool? showWeather,
+    TemperatureUnit? temperatureUnit,
+    DateStyle? dateStyle,
+    ClockStyle? clockStyle,
+    bool? nfcClockOn,
   }) => AppSettings(
     theme: theme ?? this.theme,
     accent: accent ?? this.accent,
@@ -214,6 +290,10 @@ class AppSettings {
     arrivalAlerts: arrivalAlerts ?? this.arrivalAlerts,
     arrivalRadiusMeters: arrivalRadiusMeters ?? this.arrivalRadiusMeters,
     showWeather: showWeather ?? this.showWeather,
+    temperatureUnit: temperatureUnit ?? this.temperatureUnit,
+    dateStyle: dateStyle ?? this.dateStyle,
+    clockStyle: clockStyle ?? this.clockStyle,
+    nfcClockOn: nfcClockOn ?? this.nfcClockOn,
   );
 
   @override
@@ -234,7 +314,11 @@ class AppSettings {
       other.requireProofPhoto == requireProofPhoto &&
       other.arrivalAlerts == arrivalAlerts &&
       other.arrivalRadiusMeters == arrivalRadiusMeters &&
-      other.showWeather == showWeather;
+      other.showWeather == showWeather &&
+      other.temperatureUnit == temperatureUnit &&
+      other.dateStyle == dateStyle &&
+      other.clockStyle == clockStyle &&
+      other.nfcClockOn == nfcClockOn;
 
   @override
   int get hashCode => Object.hashAll([
@@ -254,5 +338,9 @@ class AppSettings {
     arrivalAlerts,
     arrivalRadiusMeters,
     showWeather,
+    temperatureUnit,
+    dateStyle,
+    clockStyle,
+    nfcClockOn,
   ]);
 }

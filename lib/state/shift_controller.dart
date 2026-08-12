@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../data/delivery_repository.dart';
@@ -17,6 +19,14 @@ class ShiftController extends ChangeNotifier {
   List<Shift> _history = const [];
   bool _isBusy = false;
   Object? _error;
+
+  /// Drives the running clock on the shift card.
+  ///
+  /// [Shift.duration] is measured against `DateTime.now()`, so without a tick
+  /// of its own the card freezes at whatever it read when something else
+  /// happened to rebuild it — which, on a quiet round, is "0s" for the rest of
+  /// the day.
+  Timer? _ticker;
 
   Shift? get current => _current;
   List<Shift> get history => _history;
@@ -40,11 +50,12 @@ class ShiftController extends ChangeNotifier {
     } catch (error) {
       _error = error;
     }
+    _syncTicker();
     notifyListeners();
   }
 
-  /// Clocks on. Returns the shift, or null if one was already running or the
-  /// write failed.
+  /// Clocks on. Returns the shift, or null if the write failed — in which case
+  /// [error] says why.
   Future<Shift?> start({
     String? vehicleLabel,
     bool startedByTag = false,
@@ -63,10 +74,17 @@ class ShiftController extends ChangeNotifier {
       _history = await _repository.fetchShifts();
       return shift;
     } catch (error) {
+      // Most likely cause: a shift is open in the database that this
+      // controller does not know about, because `load()` failed or never ran.
+      // Adopting it beats leaving the driver tapping a button that silently
+      // does nothing.
+      final adopted = await _adoptOpenShift();
+      if (adopted != null) return adopted;
       _error = error;
       return null;
     } finally {
       _isBusy = false;
+      _syncTicker();
       notifyListeners();
     }
   }
@@ -76,6 +94,7 @@ class ShiftController extends ChangeNotifier {
     if (active == null || !active.isActive) return null;
 
     _isBusy = true;
+    _error = null;
     notifyListeners();
     try {
       final finished = await _repository.endShift(active.id);
@@ -87,7 +106,42 @@ class ShiftController extends ChangeNotifier {
       return null;
     } finally {
       _isBusy = false;
+      _syncTicker();
       notifyListeners();
     }
+  }
+
+  /// Picks up a shift already open in storage. Returns null if there is none.
+  Future<Shift?> _adoptOpenShift() async {
+    try {
+      final open = await _repository.activeShift();
+      if (open == null) return null;
+      _current = open;
+      _history = await _repository.fetchShifts();
+      _error = null;
+      return open;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Runs the clock only while one is actually needed.
+  void _syncTicker() {
+    if (isOnShift) {
+      _ticker ??= Timer.periodic(
+        const Duration(seconds: 1),
+        (_) => notifyListeners(),
+      );
+    } else {
+      _ticker?.cancel();
+      _ticker = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    _ticker = null;
+    super.dispose();
   }
 }

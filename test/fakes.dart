@@ -19,6 +19,10 @@ class FakeDeliveryRepository implements DeliveryRepository {
   /// path.
   bool failOnAppend = false;
 
+  /// Set to make [startShift] fail for a reason other than a shift already
+  /// being open — a full disk, a corrupt database.
+  bool failOnStartShift = false;
+
   var _nextTripId = 0;
 
   @override
@@ -125,6 +129,7 @@ class FakeDeliveryRepository implements DeliveryRepository {
     String? vehicleLabel,
     bool startedByTag = false,
   }) async {
+    if (failOnStartShift) throw StateError('disk full');
     if (await activeShift() != null) {
       throw StateError('Already clocked on.');
     }
@@ -159,6 +164,15 @@ class FakeDeliveryRepository implements DeliveryRepository {
       distanceMeters: distanceMeters,
     );
     trips[tripId] = ended;
+
+    // Matches the SQLite repository: ending a trip releases the stop back to
+    // pending unless it has already been closed out.
+    final delivery = deliveries[trip.deliveryId];
+    if (delivery != null && delivery.status == DeliveryStatus.inTransit) {
+      deliveries[trip.deliveryId] = delivery.copyWith(
+        status: DeliveryStatus.pending,
+      );
+    }
     return ended;
   }
 }

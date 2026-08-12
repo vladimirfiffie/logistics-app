@@ -15,6 +15,8 @@ import '../services/notification_service.dart';
 import '../state/delivery_controller.dart';
 import '../state/settings_controller.dart';
 import '../state/tracking_controller.dart';
+import 'formatters.dart';
+import 'nfc_scan_sheet.dart';
 import 'onboarding_screen.dart';
 import 'whats_new_sheet.dart';
 import 'widgets/app_sheet.dart';
@@ -113,6 +115,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
             detailOf: (unit) => unit.detail,
             onChanged: controller.setDistanceUnit,
           ),
+          _ChoiceTile<DateStyle>(
+            icon: Icons.calendar_today_outlined,
+            title: 'Date format',
+            value: settings.dateStyle,
+            // Every label is an example of itself, so the current value shown
+            // here is already a preview.
+            valueLabel: formatDate(DateTime.now()),
+            options: DateStyle.values,
+            labelOf: (style) => style.label,
+            onChanged: controller.setDateStyle,
+          ),
+          _ChoiceTile<ClockStyle>(
+            icon: Icons.schedule,
+            title: 'Time format',
+            value: settings.clockStyle,
+            valueLabel:
+                '${settings.clockStyle.label} · '
+                '${formatTime(DateTime.now())}',
+            options: ClockStyle.values,
+            labelOf: (style) => style.label,
+            detailOf: (style) => style.example,
+            onChanged: controller.setClockStyle,
+          ),
 
           const _SectionHeader('Driver'),
           _TextTile(
@@ -130,7 +155,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: controller.setVehicleLabel,
           ),
 
-          _TagTile(vehicleLabel: settings.vehicleLabel),
+          const _SectionHeader('Van tag (NFC)'),
+          _NfcSection(
+            vehicleLabel: settings.vehicleLabel,
+            clockOnWithTag: settings.nfcClockOn,
+            onClockOnWithTagChanged: controller.setNfcClockOn,
+          ),
 
           const _SectionHeader('Tracking'),
           _ChoiceTile<TrackingAccuracy>(
@@ -266,6 +296,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
               controller.setShowWeather(value);
             },
           ),
+          if (settings.showWeather)
+            _ChoiceTile<TemperatureUnit>(
+              icon: Icons.thermostat_outlined,
+              title: 'Temperature',
+              value: settings.temperatureUnit,
+              valueLabel: settings.temperatureUnit == TemperatureUnit.matchUnits
+                  ? '${settings.temperatureUnit.label} · '
+                        '${settings.usesFahrenheit ? '°F' : '°C'}'
+                  : settings.temperatureUnit.label,
+              options: TemperatureUnit.values,
+              labelOf: (unit) => unit.label,
+              detailOf: (unit) => unit.detail,
+              onChanged: controller.setTemperatureUnit,
+            ),
 
           const _SectionHeader('Permissions'),
           _PermissionTile(
@@ -596,18 +640,29 @@ class _TextTile extends StatelessWidget {
   }
 }
 
-/// Writes a van tag. Entirely optional — everything works without one, so the
-/// tile explains what it buys rather than presenting it as setup to complete.
-class _TagTile extends StatefulWidget {
-  const _TagTile({required this.vehicleLabel});
+/// The van tag, end to end: whether the hardware can do it, whether the driver
+/// wants to be asked for a tag when clocking on, writing one, and checking
+/// that a written tag actually reads back.
+///
+/// Entirely optional — everything in the app works without a tag — so the
+/// section explains what it buys rather than presenting it as setup to
+/// complete, and it stays legible on a phone with no NFC at all.
+class _NfcSection extends StatefulWidget {
+  const _NfcSection({
+    required this.vehicleLabel,
+    required this.clockOnWithTag,
+    required this.onClockOnWithTagChanged,
+  });
 
   final String vehicleLabel;
+  final bool clockOnWithTag;
+  final ValueChanged<bool> onClockOnWithTagChanged;
 
   @override
-  State<_TagTile> createState() => _TagTileState();
+  State<_NfcSection> createState() => _NfcSectionState();
 }
 
-class _TagTileState extends State<_TagTile> {
+class _NfcSectionState extends State<_NfcSection> {
   NfcReadiness? _readiness;
   bool _writing = false;
 
@@ -649,42 +704,125 @@ class _TagTileState extends State<_TagTile> {
     messenger.showSnackBar(
       SnackBar(
         content: Text(
-          problem ?? 'Tag written. Stick it somewhere you can reach.',
+          problem ??
+              'Tag written for "$label". Stick it somewhere you can '
+                  'reach from the driver\'s seat.',
         ),
       ),
     );
   }
 
+  /// Reads a tag back without clocking anyone on, so a driver can confirm the
+  /// sticker works before relying on it at six in the morning.
+  Future<void> _test() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final result = await NfcScanSheet.show(
+      context,
+      title: 'Test your tag',
+      subtitle:
+          'Reads the tag and tells you what is on it. Nothing is clocked on '
+          'or changed.',
+      manualLabel: 'Done',
+    );
+    if (result == null || !mounted) return;
+
+    if (result case NfcSheetTag(:final tag)) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Reads as "${tag.label}". This tag will clock you on.'),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final readiness = _readiness;
     final usable = readiness == NfcReadiness.ready;
 
-    return ListTile(
-      leading: _writing
-          ? const SizedBox(
+    return Column(
+      children: [
+        ListTile(
+          leading: switch (readiness) {
+            null => const SizedBox(
               width: 24,
               height: 24,
               child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : const Icon(Icons.nfc),
-      title: const Text('Van tag'),
-      subtitle: Text(switch (readiness) {
-        null => 'Checking NFC…',
-        NfcReadiness.ready when _writing =>
-          'Hold the tag against the back of your phone.',
-        NfcReadiness.ready =>
-          'Optional. Write a sticker for the van, then tap it to clock on.',
-        final NfcReadiness other =>
-          '${other.message} Clock on by tapping '
-              'the button instead.',
-      }),
-      isThreeLine: true,
-      trailing: usable && !_writing
-          ? TextButton(onPressed: _write, child: const Text('Write'))
-          : null,
-      onTap: usable && !_writing ? _write : null,
-      enabled: usable,
+            ),
+            NfcReadiness.ready => Icon(Icons.nfc, color: scheme.primary),
+            _ => Icon(Icons.nfc_outlined, color: scheme.onSurfaceVariant),
+          },
+          title: const Text('NFC'),
+          subtitle: Text(switch (readiness) {
+            null => 'Checking this phone…',
+            NfcReadiness.ready =>
+              'Ready. A tag is optional — every button still works without '
+                  'one.',
+            NfcReadiness.disabled =>
+              'Switched off in system settings. Turn NFC on there, then check '
+                  'again.',
+            NfcReadiness.unsupported =>
+              'This phone has no NFC hardware. Clock on with the button '
+                  'instead — nothing else is affected.',
+          }),
+          isThreeLine: readiness != null,
+          trailing: readiness == NfcReadiness.disabled
+              ? TextButton(onPressed: _check, child: const Text('Check again'))
+              : null,
+        ),
+
+        SwitchListTile(
+          secondary: const Icon(Icons.touch_app_outlined),
+          title: const Text('Ask for a tag when clocking on'),
+          subtitle: Text(
+            widget.clockOnWithTag
+                ? 'Clocking on opens the tag reader, with a button to start '
+                      'without one.'
+                : 'Clocking on starts your shift straight away.',
+          ),
+          isThreeLine: widget.clockOnWithTag,
+          value: widget.clockOnWithTag,
+          onChanged: (value) {
+            AppHaptics.select();
+            widget.onClockOnWithTagChanged(value);
+          },
+        ),
+
+        ListTile(
+          leading: _writing
+              ? const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.edit_note_outlined),
+          title: const Text('Write a van tag'),
+          subtitle: Text(
+            _writing
+                ? 'Hold the tag against the back of your phone.'
+                : widget.vehicleLabel.trim().isEmpty
+                ? 'Set "Van or round" above first — that is what goes on the '
+                      'tag.'
+                : 'Writes "${widget.vehicleLabel}" onto a blank NDEF tag.',
+          ),
+          isThreeLine: true,
+          trailing: const Icon(Icons.chevron_right),
+          onTap: usable && !_writing ? _write : null,
+          enabled: usable && !_writing,
+        ),
+
+        ListTile(
+          leading: const Icon(Icons.wifi_tethering),
+          title: const Text('Test a tag'),
+          subtitle: const Text(
+            'Check a sticker reads correctly without clocking on.',
+          ),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: usable && !_writing ? _test : null,
+          enabled: usable && !_writing,
+        ),
+      ],
     );
   }
 }

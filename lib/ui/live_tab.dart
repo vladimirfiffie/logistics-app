@@ -14,6 +14,7 @@ import '../state/tracking_controller.dart';
 import '../state/settings_controller.dart';
 import 'delivery_actions.dart';
 import 'formatters.dart';
+import 'widgets/app_sheet.dart';
 import 'widgets/stat_tile.dart';
 import 'widgets/trip_map.dart';
 
@@ -100,6 +101,77 @@ class _LiveTabState extends State<LiveTab> {
   Future<void> _arrived(Delivery delivery) async {
     final closed = await completeDelivery(context, delivery);
     if (!closed) _slideKey.currentState?.reset();
+  }
+
+  /// Stopping is the one action here that silently changes what the phone is
+  /// doing in the background, so it asks first and reports back afterwards.
+  /// Without either, the driver has no way to tell whether the tap landed and
+  /// whether their location is still being shared.
+  Future<void> _stopRecording() async {
+    final tracking = context.read<TrackingController>();
+    final unit = context.read<SettingsController>().settings.distanceUnit;
+    final messenger = ScaffoldMessenger.of(context);
+    final reference = tracking.delivery?.reference;
+    final recorded = formatDistance(tracking.distanceMeters, unit: unit);
+
+    final confirmed = await _confirmStop(recorded);
+    if (confirmed != true || !mounted) return;
+
+    final finished = await tracking.stop();
+    await AppHaptics.trackingStopped();
+    if (!mounted) return;
+
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          finished == null
+              ? 'Could not stop the recording. Try again.'
+              : 'Recording stopped · location sharing ended · $recorded '
+                    'recorded.'
+                    '${reference == null ? '' : ' $reference is back on the '
+                              'manifest.'}',
+        ),
+      ),
+    );
+  }
+
+  Future<bool?> _confirmStop(String recorded) {
+    final scheme = Theme.of(context).colorScheme;
+    return showAppSheet<bool>(
+      context,
+      builder: (sheetContext) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SheetHeader(
+              title: 'Stop recording?',
+              subtitle:
+                  'Location sharing ends and the trail stops here, with '
+                  '$recorded recorded. The stop goes back on the manifest so '
+                  'you can pick it up again — nothing is closed out.',
+              icon: Icons.stop_circle_outlined,
+            ),
+            const SizedBox(height: 22),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(sheetContext).pop(true),
+              icon: const Icon(Icons.stop_circle_outlined),
+              label: const Text('Stop recording'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+                backgroundColor: scheme.error,
+                foregroundColor: scheme.onError,
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(sheetContext).pop(false),
+              child: const Text('Keep sharing my location'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _syncWakelock(bool isTracking) {
@@ -193,7 +265,7 @@ class _LiveTabState extends State<LiveTab> {
                   slideKey: _slideKey,
                   onArrived: () => _arrived(delivery),
                   onFailed: () => failDelivery(context, delivery),
-                  onEndTrip: tracking.stop,
+                  onEndTrip: _stopRecording,
                 ),
               ],
             ),
@@ -461,6 +533,32 @@ class _TripPanel extends StatelessWidget {
                   Text(
                     'Waiting for the first GPS fix…',
                     style: theme.textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ],
+
+            // A finished trip still on screen looks exactly like a running
+            // one otherwise, which is half of why "stop" felt like it had not
+            // worked.
+            if (!tracking.isTracking) ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Icon(
+                    Icons.location_off_outlined,
+                    size: 15,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Recording stopped. Your location is no longer being '
+                      'shared.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
                   ),
                 ],
               ),

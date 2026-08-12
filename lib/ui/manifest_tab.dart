@@ -10,13 +10,13 @@ import '../services/app_haptics.dart';
 import '../services/location_service.dart';
 import '../state/delivery_controller.dart';
 import 'delivery_detail_sheet.dart';
-import 'settings_screen.dart';
 import 'widgets/app_sheet.dart';
 import 'widgets/delivery_card.dart';
 
 enum _SortMode {
-  time('By time', Icons.schedule),
-  distance('By distance', Icons.near_me_outlined);
+  time('Time', Icons.schedule),
+  distance('Distance', Icons.near_me_outlined),
+  name('A–Z', Icons.sort_by_alpha);
 
   const _SortMode(this.label, this.icon);
 
@@ -74,10 +74,21 @@ class _ManifestTabState extends State<ManifestTab> {
 
   List<Delivery> _sorted(List<Delivery> stops) {
     final list = [...stops];
-    if (_sort == _SortMode.distance && _fix != null) {
-      list.sort((a, b) => (_distanceTo(a) ?? 0).compareTo(_distanceTo(b) ?? 0));
-    } else {
-      list.sort((a, b) => a.scheduledFor.compareTo(b.scheduledFor));
+    switch (_sort) {
+      // Falls back to time when there is no fix to measure from, which is
+      // also why the chip is disabled in that state.
+      case _SortMode.distance when _fix != null:
+        list.sort(
+          (a, b) => (_distanceTo(a) ?? 0).compareTo(_distanceTo(b) ?? 0),
+        );
+      case _SortMode.name:
+        list.sort(
+          (a, b) => a.customerName.toLowerCase().compareTo(
+            b.customerName.toLowerCase(),
+          ),
+        );
+      case _:
+        list.sort((a, b) => a.scheduledFor.compareTo(b.scheduledFor));
     }
     return list;
   }
@@ -152,100 +163,123 @@ class _ManifestTabState extends State<ManifestTab> {
     final controller = context.watch<DeliveryController>();
     final stops = _sorted(controller.openStops);
 
-    return RefreshIndicator(
-      onRefresh: () async {
-        await Future.wait([controller.refresh(), _refreshFix()]);
-      },
-      child: CustomScrollView(
-        slivers: [
-          SliverAppBar.large(
-            title: const Text("Today's run"),
-            actions: [
-              IconButton(
-                onPressed: _addStops,
-                icon: const Icon(Icons.add_road),
-                tooltip: 'Add more stops',
-              ),
-              IconButton(
-                onPressed: () => SettingsScreen.show(context),
-                icon: const Icon(Icons.settings_outlined),
-                tooltip: 'Settings',
-              ),
-              PopupMenuButton<_SortMode>(
-                initialValue: _sort,
-                icon: const Icon(Icons.sort),
-                tooltip: 'Sort stops',
-                onSelected: (mode) {
+    return Scaffold(
+      // The list is the whole page, so "add stops" belongs on a button over it
+      // rather than as a third icon competing for the app bar.
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _addStops,
+        icon: const Icon(Icons.add_road),
+        label: const Text('Add stops'),
+      ),
+      body: RefreshIndicator(
+        onRefresh: () async {
+          await Future.wait([controller.refresh(), _refreshFix()]);
+        },
+        child: CustomScrollView(
+          slivers: [
+            const SliverAppBar.large(title: Text("Today's run")),
+
+            SliverToBoxAdapter(
+              child: _SortChips(
+                selected: _sort,
+                distanceEnabled: _fix != null,
+                onChanged: (mode) {
                   AppHaptics.select();
                   setState(() => _sort = mode);
                 },
-                itemBuilder: (_) => [
-                  for (final mode in _SortMode.values)
-                    PopupMenuItem(
-                      value: mode,
-                      enabled: mode != _SortMode.distance || _fix != null,
-                      child: Row(
-                        children: [
-                          Icon(mode.icon, size: 18),
-                          const SizedBox(width: 10),
-                          Text(mode.label),
-                        ],
-                      ),
+              ),
+            ),
+
+            SliverToBoxAdapter(
+              child: _RunSummary(
+                stopsRemaining: stops.length,
+                parcelsRemaining: controller.remainingParcels,
+                completed: controller.closedStops.length,
+                hasFix: _fix != null,
+              ),
+            ),
+
+            if (controller.isLoading && stops.isEmpty)
+              const SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (controller.error case final Object error)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: _Message(
+                  icon: Icons.error_outline,
+                  title: 'Could not load the manifest',
+                  detail: '$error',
+                ),
+              )
+            else if (stops.isEmpty)
+              const SliverFillRemaining(
+                hasScrollBody: false,
+                child: _Message(
+                  icon: Icons.task_alt,
+                  title: 'Run complete',
+                  detail: 'Every stop on the manifest has been closed out.',
+                ),
+              )
+            else
+              SliverList.builder(
+                itemCount: stops.length,
+                itemBuilder: (context, index) {
+                  final delivery = stops[index];
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                    child: DeliveryCard(
+                      delivery: delivery,
+                      distanceMeters: _distanceTo(delivery),
+                      onTap: () => _open(delivery),
                     ),
-                ],
+                  );
+                },
               ),
-            ],
-          ),
 
-          SliverToBoxAdapter(
-            child: _RunSummary(
-              stopsRemaining: stops.length,
-              parcelsRemaining: controller.remainingParcels,
-              completed: controller.closedStops.length,
-              hasFix: _fix != null,
+            // Clears the extended FAB at the end of the list.
+            const SliverToBoxAdapter(child: SizedBox(height: 88)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Sort control, moved out of the app bar. Three options is small enough to
+/// show all of them, which beats a menu that hides the current choice behind
+/// an icon.
+class _SortChips extends StatelessWidget {
+  const _SortChips({
+    required this.selected,
+    required this.distanceEnabled,
+    required this.onChanged,
+  });
+
+  final _SortMode selected;
+  final bool distanceEnabled;
+  final ValueChanged<_SortMode> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+      child: Row(
+        children: [
+          for (final mode in _SortMode.values) ...[
+            ChoiceChip(
+              label: Text(mode.label),
+              avatar: Icon(mode.icon, size: 17),
+              selected: selected == mode,
+              // Sorting by distance needs a fix to measure from.
+              onSelected: mode == _SortMode.distance && !distanceEnabled
+                  ? null
+                  : (_) => onChanged(mode),
             ),
-          ),
-
-          if (controller.isLoading && stops.isEmpty)
-            const SliverFillRemaining(
-              hasScrollBody: false,
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (controller.error case final Object error)
-            SliverFillRemaining(
-              hasScrollBody: false,
-              child: _Message(
-                icon: Icons.error_outline,
-                title: 'Could not load the manifest',
-                detail: '$error',
-              ),
-            )
-          else if (stops.isEmpty)
-            const SliverFillRemaining(
-              hasScrollBody: false,
-              child: _Message(
-                icon: Icons.task_alt,
-                title: 'Run complete',
-                detail: 'Every stop on the manifest has been closed out.',
-              ),
-            )
-          else
-            SliverList.builder(
-              itemCount: stops.length,
-              itemBuilder: (context, index) {
-                final delivery = stops[index];
-                return Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-                  child: DeliveryCard(
-                    delivery: delivery,
-                    distanceMeters: _distanceTo(delivery),
-                    onTap: () => _open(delivery),
-                  ),
-                );
-              },
-            ),
-
-          const SliverToBoxAdapter(child: SizedBox(height: 24)),
+            const SizedBox(width: 8),
+          ],
         ],
       ),
     );

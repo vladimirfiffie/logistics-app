@@ -154,8 +154,18 @@ class TrackingController extends ChangeNotifier {
     _isBusy = true;
     notifyListeners();
     try {
+      // Cancelling the subscription is what tears down the Android foreground
+      // service and its persistent "sharing your location" notification, so it
+      // happens first and is awaited — a stop that leaves the service running
+      // is worse than a stop that takes an extra moment.
       await _subscription?.cancel();
       _subscription = null;
+      _announcedArrival = false;
+
+      // The arrival alert is not auto-dismissed, so without this it sits in
+      // the shade after the trip it belongs to has finished.
+      await _notifications.cancelArrival();
+
       final finished = await _repository.endTrip(
         active.id,
         distanceMeters: _distanceMeters,

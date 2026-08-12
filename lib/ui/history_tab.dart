@@ -4,12 +4,10 @@ import 'package:provider/provider.dart';
 import '../data/delivery_repository.dart';
 import '../models/delivery.dart';
 import '../models/trip.dart';
-import '../release_notes.dart';
 import '../state/delivery_controller.dart';
 import '../state/settings_controller.dart';
 import 'delivery_detail_sheet.dart';
 import 'formatters.dart';
-import 'whats_new_sheet.dart';
 import 'widgets/status_chip.dart';
 
 /// Closed-out stops and the distance recorded getting to them.
@@ -62,17 +60,9 @@ class _HistoryTabState extends State<HistoryTab> {
       },
       child: CustomScrollView(
         slivers: [
-          SliverAppBar.large(
-            title: const Text('History'),
-            actions: [
-              IconButton(
-                onPressed: () => WhatsNewSheet.show(context, currentRelease),
-                icon: const Icon(Icons.auto_awesome_outlined),
-                tooltip: "What's new in ${currentRelease.version}",
-              ),
-              const SizedBox(width: 4),
-            ],
-          ),
+          // No actions: "What's new" lives in Settings → About, which is the
+          // one place a driver goes looking for it.
+          const SliverAppBar.large(title: Text('History')),
 
           SliverToBoxAdapter(
             child: Padding(

@@ -4,9 +4,26 @@ import '../models/app_settings.dart';
 
 /// Display helpers shared across screens. Kept in one place so a distance
 /// reads the same on the map, the job card, and the history entry.
-final _timeFormat = DateFormat.Hm();
-final _dateFormat = DateFormat('EEE d MMM');
-final _dateTimeFormat = DateFormat('EEE d MMM, HH:mm');
+
+/// The driver's date and time choices, mirrored out of `SettingsController`.
+///
+/// Same trick as `AppHaptics.enabled`: dates are formatted from plain
+/// functions called deep inside build methods and from code with no provider
+/// in reach, and threading two enums through every one of those call sites
+/// would cost more than it buys.
+class DateFormatting {
+  const DateFormatting._();
+
+  static DateStyle date = DateStyle.dayMonth;
+  static ClockStyle clock = ClockStyle.twentyFour;
+
+  /// `DateFormat` parses its pattern on construction, so the handful in play
+  /// are built once rather than on every list row.
+  static final _cache = <String, DateFormat>{};
+
+  static DateFormat _of(String pattern) =>
+      _cache.putIfAbsent(pattern, () => DateFormat(pattern));
+}
 
 const _metresPerMile = 1609.344;
 const _feetPerMetre = 3.28084;
@@ -64,11 +81,32 @@ String formatAccuracy(
   return '±${meters.round()} m';
 }
 
-String formatTime(DateTime time) => _timeFormat.format(time);
+/// Celsius in, whatever the driver reads out.
+String formatTemperature(double celsius, {bool fahrenheit = false}) {
+  if (celsius.isNaN || celsius.isInfinite) return '—';
+  if (fahrenheit) return '${(celsius * 9 / 5 + 32).round()}°F';
+  return '${celsius.round()}°C';
+}
 
-String formatDate(DateTime time) => _dateFormat.format(time);
+/// Wind arrives from the forecast in km/h and follows the distance unit —
+/// nobody reads their distances in miles and their wind in kilometres.
+String formatWindSpeed(double kph, {DistanceUnit unit = DistanceUnit.metric}) {
+  if (kph.isNaN || kph.isInfinite) return '—';
+  if (unit == DistanceUnit.imperial) {
+    return '${(kph * 1000 / _metresPerMile).round()} mph';
+  }
+  return '${kph.round()} km/h';
+}
 
-String formatDateTime(DateTime time) => _dateTimeFormat.format(time);
+String formatTime(DateTime time) =>
+    DateFormatting._of(DateFormatting.clock.pattern).format(time);
+
+String formatDate(DateTime time) =>
+    DateFormatting._of(DateFormatting.date.pattern).format(time);
+
+String formatDateTime(DateTime time) =>
+    '${formatDate(time)}, '
+    '${formatTime(time)}';
 
 /// Signed decimal degrees, the format that pastes cleanly into any map app.
 String formatCoordinates(double latitude, double longitude) =>

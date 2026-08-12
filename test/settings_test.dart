@@ -154,12 +154,39 @@ void main() {
       expect(second.settings.amoled, isTrue);
     });
 
+    test('formats, temperature and the tag prompt round-trip', () async {
+      final first = SettingsController();
+      await first.load();
+      // Defaults first: these must not silently change what existing
+      // installs see.
+      expect(first.settings.temperatureUnit, TemperatureUnit.matchUnits);
+      expect(first.settings.dateStyle, DateStyle.dayMonth);
+      expect(first.settings.clockStyle, ClockStyle.twentyFour);
+      expect(first.settings.nfcClockOn, isTrue);
+
+      await first.setTemperatureUnit(TemperatureUnit.fahrenheit);
+      await first.setDateStyle(DateStyle.iso);
+      await first.setClockStyle(ClockStyle.twelveHour);
+      await first.setNfcClockOn(false);
+
+      final second = SettingsController();
+      await second.load();
+
+      expect(second.settings.temperatureUnit, TemperatureUnit.fahrenheit);
+      expect(second.settings.dateStyle, DateStyle.iso);
+      expect(second.settings.clockStyle, ClockStyle.twelveHour);
+      expect(second.settings.nfcClockOn, isFalse);
+    });
+
     test('reset clears the newer keys too', () async {
       final controller = SettingsController();
       await controller.load();
       await controller.setDriverName('Vlad');
       await controller.setAmoled(true);
       await controller.setShowWeather(false);
+      await controller.setDateStyle(DateStyle.iso);
+      await controller.setTemperatureUnit(TemperatureUnit.fahrenheit);
+      await controller.setNfcClockOn(false);
 
       await controller.resetToDefaults();
 
@@ -197,6 +224,85 @@ void main() {
     test('non-finite distances stay readable in both units', () {
       expect(formatDistance(double.nan), '—');
       expect(formatDistance(double.infinity, unit: DistanceUnit.imperial), '—');
+    });
+  });
+
+  group('weather units', () {
+    test('temperature converts and rounds', () {
+      expect(formatTemperature(14.4), '14°C');
+      expect(formatTemperature(0, fahrenheit: true), '32°F');
+      expect(formatTemperature(100, fahrenheit: true), '212°F');
+      expect(formatTemperature(double.nan), '—');
+    });
+
+    test('wind follows the distance unit', () {
+      expect(formatWindSpeed(48), '48 km/h');
+      // 48 km/h is just under 30 mph.
+      expect(formatWindSpeed(48, unit: DistanceUnit.imperial), '30 mph');
+    });
+
+    test('"match my units" resolves against the distance unit', () {
+      const metric = AppSettings();
+      const imperial = AppSettings(distanceUnit: DistanceUnit.imperial);
+
+      expect(metric.usesFahrenheit, isFalse);
+      expect(imperial.usesFahrenheit, isTrue);
+    });
+
+    test('an explicit choice overrides the distance unit', () {
+      // The UK case: miles on the road, Celsius on the forecast.
+      const settings = AppSettings(
+        distanceUnit: DistanceUnit.imperial,
+        temperatureUnit: TemperatureUnit.celsius,
+      );
+      expect(settings.usesFahrenheit, isFalse);
+
+      const other = AppSettings(temperatureUnit: TemperatureUnit.fahrenheit);
+      expect(other.usesFahrenheit, isTrue);
+    });
+  });
+
+  group('date and time formats', () {
+    final when = DateTime(2026, 8, 12, 17, 45);
+
+    tearDown(() {
+      DateFormatting.date = DateStyle.dayMonth;
+      DateFormatting.clock = ClockStyle.twentyFour;
+    });
+
+    test('every date style renders what its label advertises', () {
+      for (final style in DateStyle.values) {
+        DateFormatting.date = style;
+        expect(formatDate(when), style.label);
+      }
+    });
+
+    test('the clock switches between 24- and 12-hour', () {
+      DateFormatting.clock = ClockStyle.twentyFour;
+      expect(formatTime(when), '17:45');
+
+      DateFormatting.clock = ClockStyle.twelveHour;
+      expect(formatTime(when), '5:45 PM');
+    });
+
+    test('a combined date-time uses both choices', () {
+      DateFormatting.date = DateStyle.iso;
+      DateFormatting.clock = ClockStyle.twelveHour;
+
+      expect(formatDateTime(when), '2026-08-12, 5:45 PM');
+    });
+
+    test('the controller mirrors the choice onto the formatters', () async {
+      final controller = SettingsController();
+      await controller.load();
+
+      await controller.setDateStyle(DateStyle.iso);
+      await controller.setClockStyle(ClockStyle.twelveHour);
+
+      // formatDate is called from plain functions with no provider in reach,
+      // so the mirror is the only thing keeping them in step.
+      expect(formatDate(when), '2026-08-12');
+      expect(formatTime(when), '5:45 PM');
     });
   });
 

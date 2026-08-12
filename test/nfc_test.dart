@@ -145,6 +145,9 @@ void main() {
       controller = ShiftController(repository);
     });
 
+    // The controller runs a one-second ticker while a shift is open.
+    tearDown(() => controller.dispose());
+
     test('starts and ends a shift', () async {
       await controller.load();
       expect(controller.isOnShift, isFalse);
@@ -204,6 +207,58 @@ void main() {
       // The running one has no final duration yet, so it must not be counted.
       expect(controller.history, hasLength(2));
       expect(controller.totalWorked, isNot(Duration.zero));
+    });
+
+    test('ticks while on shift so the elapsed clock is not frozen', () async {
+      await controller.load();
+      await controller.start();
+
+      var ticks = 0;
+      controller.addListener(() => ticks++);
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
+
+      // Shift.duration is measured against DateTime.now(), so without a tick
+      // of its own the card reads "0s" for the whole shift.
+      expect(ticks, greaterThan(0));
+      expect(controller.elapsed, greaterThan(Duration.zero));
+    });
+
+    test('stops ticking once clocked off', () async {
+      await controller.load();
+      await controller.start();
+      await controller.end();
+
+      var ticks = 0;
+      controller.addListener(() => ticks++);
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
+
+      expect(ticks, 0);
+    });
+
+    test('adopts a shift opened behind the controller\'s back', () async {
+      // load() never ran, or failed — so the controller believes nobody is
+      // clocked on while storage disagrees. Clocking on used to fail silently
+      // here and leave the button doing nothing at all.
+      await repository.startShift(vehicleLabel: 'Van 9');
+
+      final started = await controller.start();
+
+      expect(started, isNotNull);
+      expect(controller.isOnShift, isTrue);
+      expect(controller.current!.vehicleLabel, 'Van 9');
+      expect(controller.error, isNull);
+      expect(repository.shifts, hasLength(1), reason: 'no duplicate shift');
+    });
+
+    test('reports why a clock-on failed', () async {
+      await controller.load();
+      repository.failOnStartShift = true;
+
+      final started = await controller.start();
+
+      expect(started, isNull);
+      expect(controller.error, isNotNull);
+      expect(controller.isOnShift, isFalse);
     });
   });
 
