@@ -1,4 +1,5 @@
 import '../models/delivery.dart';
+import '../models/shift.dart';
 import '../models/trip.dart';
 import '../models/trip_point.dart';
 
@@ -42,4 +43,16 @@ abstract interface class DeliveryRepository {
   /// Wipes every delivery, trip and breadcrumb. Used by "start a new day",
   /// which then re-seeds a fresh manifest.
   Future<void> deleteEverything();
+
+  /// The shift currently clocked on, if any. At most one exists.
+  Future<Shift?> activeShift();
+
+  /// Clocks on. Throws [StateError] if a shift is already running.
+  Future<Shift> startShift({String? vehicleLabel, bool startedByTag = false});
+
+  /// Clocks off and returns the finished shift.
+  Future<Shift> endShift(String shiftId);
+
+  /// Every shift, newest first.
+  Future<List<Shift>> fetchShifts();
 }

@@ -4,9 +4,11 @@ import 'package:provider/provider.dart';
 import 'data/delivery_repository.dart';
 import 'models/app_settings.dart';
 import 'services/location_service.dart';
+import 'services/nfc_service.dart';
 import 'services/weather_service.dart';
 import 'state/delivery_controller.dart';
 import 'state/settings_controller.dart';
+import 'state/shift_controller.dart';
 import 'state/tracking_controller.dart';
 import 'ui/startup_gate.dart';
 
@@ -34,6 +36,10 @@ class LogisticsApp extends StatelessWidget {
       providers: [
         Provider<DeliveryRepository>.value(value: repository),
         Provider<LocationService>.value(value: locationService),
+        Provider<NfcService>(create: (_) => NfcService()),
+        ChangeNotifierProvider<ShiftController>(
+          create: (_) => ShiftController(repository)..load(),
+        ),
         Provider<WeatherService>(
           create: (_) => WeatherService(),
           dispose: (_, service) => service.dispose(),

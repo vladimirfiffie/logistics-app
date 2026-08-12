@@ -8,7 +8,7 @@ import '../state/delivery_controller.dart';
 import '../state/settings_controller.dart';
 import '../state/tracking_controller.dart';
 import 'complete_delivery_sheet.dart';
-import 'delivery_success_sheet.dart';
+import 'delivery_outcome_sheet.dart';
 import 'failure_reason_sheet.dart';
 
 /// Closing out a stop is reachable from the detail sheet, the live tracking
@@ -19,17 +19,14 @@ import 'failure_reason_sheet.dart';
 Future<bool> completeDelivery(BuildContext context, Delivery delivery) async {
   final settings = context.read<SettingsController>().settings;
 
-  final proof = await CompleteDeliverySheet.show(context, delivery);
+  // The sheet enforces the photo requirement itself, so the driver is told
+  // before filling the form in rather than rejected after tapping the button.
+  final proof = await CompleteDeliverySheet.show(
+    context,
+    delivery,
+    requirePhoto: settings.requireProofPhoto,
+  );
   if (proof == null || !context.mounted) return false;
-
-  if (settings.requireProofPhoto && proof.photoPath == null) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('A proof photo is required before closing this stop.'),
-      ),
-    );
-    return false;
-  }
 
   final deliveries = context.read<DeliveryController>();
   final repository = context.read<DeliveryRepository>();
@@ -50,7 +47,7 @@ Future<bool> completeDelivery(BuildContext context, Delivery delivery) async {
   if (!context.mounted) return true;
 
   final remaining = deliveries.openStops;
-  await DeliverySuccessSheet.show(
+  await DeliveryOutcomeSheet.show(
     context,
     delivery: delivery,
     trip: trip,
@@ -67,10 +64,31 @@ Future<bool> failDelivery(BuildContext context, Delivery delivery) async {
   final reason = await FailureReasonSheet.show(context);
   if (reason == null || !context.mounted) return false;
 
+  final settings = context.read<SettingsController>().settings;
   final deliveries = context.read<DeliveryController>();
+  final repository = context.read<DeliveryRepository>();
+
   await _endTripFor(context, delivery);
   await deliveries.markFailed(delivery, reason: reason);
   await AppHaptics.deliveryFailed();
+
+  if (!settings.celebrateDeliveries || !context.mounted) return true;
+
+  // The same confirmation as a successful stop. Silently dropping back to the
+  // list after recording a failure leaves the driver unsure it registered.
+  final trip = await repository.tripForDelivery(delivery.id);
+  if (!context.mounted) return true;
+
+  final remaining = deliveries.openStops;
+  await DeliveryOutcomeSheet.show(
+    context,
+    delivery: delivery,
+    trip: trip,
+    unit: settings.distanceUnit,
+    remainingStops: remaining.length,
+    nextStop: remaining.isEmpty ? null : remaining.first,
+    failureReason: reason,
+  );
   return true;
 }
 

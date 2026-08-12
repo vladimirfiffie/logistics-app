@@ -6,7 +6,9 @@ class AppDatabase {
   AppDatabase._();
 
   static const _fileName = 'logistics.db';
-  static const _version = 1;
+
+  /// v2 added the `shifts` table.
+  static const _version = 2;
 
   static Database? _instance;
 
@@ -18,6 +20,7 @@ class AppDatabase {
       version: _version,
       onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
       onCreate: _createSchema,
+      onUpgrade: _upgradeSchema,
     );
     return _instance!;
   }
@@ -79,6 +82,32 @@ class AppDatabase {
       'CREATE INDEX idx_trip_points_trip ON trip_points(trip_id, recorded_at)',
     );
     await db.execute('CREATE INDEX idx_trips_delivery ON trips(delivery_id)');
+
+    await _createShifts(db);
+  }
+
+  static Future<void> _createShifts(Database db) async {
+    await db.execute('''
+      CREATE TABLE shifts (
+        id TEXT PRIMARY KEY,
+        started_at INTEGER NOT NULL,
+        ended_at INTEGER,
+        vehicle_label TEXT,
+        started_by_tag INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await db.execute('CREATE INDEX idx_shifts_started ON shifts(started_at)');
+  }
+
+  /// Migrations run in order, each guarded by the version it introduced, so a
+  /// device two versions behind catches up in one open rather than needing a
+  /// reinstall.
+  static Future<void> _upgradeSchema(
+    Database db,
+    int oldVersion,
+    int newVersion,
+  ) async {
+    if (oldVersion < 2) await _createShifts(db);
   }
 
   /// Schema statements, exposed so tests can build the same tables in memory.

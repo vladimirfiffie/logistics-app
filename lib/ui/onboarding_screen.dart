@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/app_settings.dart';
+import '../models/van_tag.dart';
 import '../services/app_haptics.dart';
+import '../services/nfc_service.dart';
 import '../state/settings_controller.dart';
 
 /// First-run flow: what the app does, what it records, the choices worth
@@ -37,7 +39,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final _pages = PageController();
   int _page = 0;
 
-  static const _lastPage = 3;
+  static const _lastPage = 4;
 
   @override
   void dispose() {
@@ -92,6 +94,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   _WelcomePage(),
                   _TrackingPage(),
                   _PrivacyPage(),
+                  _VanPage(),
                   _PreferencesPage(),
                 ],
               ),
@@ -316,6 +319,148 @@ class _PrivacyPage extends StatelessWidget {
           title: 'Uninstall removes it',
           detail: 'Everything goes with the app.',
         ),
+      ],
+    );
+  }
+}
+
+/// Who is driving, and what. Both optional — the app works perfectly with
+/// them blank — but a van label is worth asking for once here, because it is
+/// what goes on an NFC tag and what the home screen greets you with.
+class _VanPage extends StatefulWidget {
+  const _VanPage();
+
+  @override
+  State<_VanPage> createState() => _VanPageState();
+}
+
+class _VanPageState extends State<_VanPage> {
+  late final TextEditingController _name;
+  late final TextEditingController _van;
+  NfcReadiness? _readiness;
+  bool _writing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final settings = context.read<SettingsController>().settings;
+    _name = TextEditingController(text: settings.driverName);
+    _van = TextEditingController(text: settings.vehicleLabel);
+    _checkNfc();
+  }
+
+  Future<void> _checkNfc() async {
+    final readiness = await context.read<NfcService>().readiness();
+    if (mounted) setState(() => _readiness = readiness);
+  }
+
+  @override
+  void dispose() {
+    // Deliberately no saving here: `context.read` in dispose throws once the
+    // widget is deactivated, and PageView disposes pages you swipe away from.
+    // Both fields save as they are typed instead.
+    _name.dispose();
+    _van.dispose();
+    super.dispose();
+  }
+
+  Future<void> _writeTag() async {
+    final label = _van.text.trim();
+    final messenger = ScaffoldMessenger.of(context);
+    if (label.isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Give the van a name first.')),
+      );
+      return;
+    }
+
+    final nfc = context.read<NfcService>();
+    setState(() => _writing = true);
+    final problem = await nfc.writeVanTag(VanTag(label: label));
+    if (!mounted) return;
+    setState(() => _writing = false);
+
+    await (problem == null ? AppHaptics.delivered() : AppHaptics.error());
+    messenger.showSnackBar(
+      SnackBar(content: Text(problem ?? 'Tag written for $label.')),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final hasNfc = _readiness == NfcReadiness.ready;
+
+    return _Page(
+      icon: Icons.local_shipping_outlined,
+      title: 'Your van',
+      body: 'Both optional, and both changeable later in Settings.',
+      children: [
+        TextField(
+          controller: _name,
+          textCapitalization: TextCapitalization.words,
+          textInputAction: TextInputAction.next,
+          decoration: const InputDecoration(
+            labelText: 'Your name',
+            hintText: 'So the app can say hello',
+            prefixIcon: Icon(Icons.badge_outlined),
+          ),
+          onChanged: context.read<SettingsController>().setDriverName,
+        ),
+        const SizedBox(height: 14),
+        TextField(
+          controller: _van,
+          textCapitalization: TextCapitalization.characters,
+          decoration: const InputDecoration(
+            labelText: 'Van or round',
+            hintText: 'e.g. LT21 KXR, or Round 4',
+            prefixIcon: Icon(Icons.local_shipping_outlined),
+          ),
+          onChanged: (value) {
+            context.read<SettingsController>().setVehicleLabel(value);
+            // Drives the "write a tag" button's enabled state.
+            setState(() {});
+          },
+        ),
+        const SizedBox(height: 24),
+
+        // Only offered when the phone can actually do it. Dangling a disabled
+        // button in front of someone whose phone has no NFC is just noise.
+        if (hasNfc) ...[
+          Text(
+            'GOT AN NFC TAG HANDY?',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.primary,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.8,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Write one now and stick it in the van — then tapping it clocks '
+            'you on. Entirely optional, and you can do it later.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: _writing || _van.text.trim().isEmpty ? null : _writeTag,
+            icon: _writing
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.nfc),
+            label: Text(
+              _writing ? 'Hold it against the phone…' : 'Write a tag',
+            ),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+            ),
+          ),
+        ],
       ],
     );
   }

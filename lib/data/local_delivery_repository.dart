@@ -2,6 +2,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/delivery.dart';
+import '../models/shift.dart';
 import '../models/trip.dart';
 import '../models/trip_point.dart';
 import 'delivery_repository.dart';
@@ -127,6 +128,60 @@ class LocalDeliveryRepository implements DeliveryRepository {
   }
 
   @override
+  Future<Shift?> activeShift() async {
+    final rows = await _db.query(
+      'shifts',
+      where: 'ended_at IS NULL',
+      orderBy: 'started_at DESC',
+      limit: 1,
+    );
+    return rows.isEmpty ? null : Shift.fromMap(rows.first);
+  }
+
+  @override
+  Future<Shift> startShift({
+    String? vehicleLabel,
+    bool startedByTag = false,
+  }) async {
+    final existing = await activeShift();
+    if (existing != null) {
+      throw StateError('Already clocked on since ${existing.startedAt}.');
+    }
+    final shift = Shift(
+      id: _uuid.v4(),
+      startedAt: DateTime.now(),
+      vehicleLabel: vehicleLabel,
+      startedByTag: startedByTag,
+    );
+    await _db.insert('shifts', shift.toMap());
+    return shift;
+  }
+
+  @override
+  Future<Shift> endShift(String shiftId) async {
+    await _db.update(
+      'shifts',
+      {'ended_at': DateTime.now().toUtc().millisecondsSinceEpoch},
+      where: 'id = ?',
+      whereArgs: [shiftId],
+    );
+    final rows = await _db.query(
+      'shifts',
+      where: 'id = ?',
+      whereArgs: [shiftId],
+      limit: 1,
+    );
+    if (rows.isEmpty) throw StateError('Shift $shiftId no longer exists.');
+    return Shift.fromMap(rows.first);
+  }
+
+  @override
+  Future<List<Shift>> fetchShifts() async {
+    final rows = await _db.query('shifts', orderBy: 'started_at DESC');
+    return rows.map(Shift.fromMap).toList();
+  }
+
+  @override
   Future<void> deleteEverything() async {
     await _db.transaction((txn) async {
       // Explicit rather than relying on cascade, so this still empties the
@@ -134,6 +189,7 @@ class LocalDeliveryRepository implements DeliveryRepository {
       await txn.delete('trip_points');
       await txn.delete('trips');
       await txn.delete('deliveries');
+      await txn.delete('shifts');
     });
   }
 

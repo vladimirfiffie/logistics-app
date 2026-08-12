@@ -15,20 +15,31 @@ typedef ProofOfDelivery = ({String? recipientName, String? photoPath});
 /// Bottom sheet for confirming a delivery: who signed for it and a photo of
 /// where it was left.
 class CompleteDeliverySheet extends StatefulWidget {
-  const CompleteDeliverySheet({super.key, required this.delivery});
+  const CompleteDeliverySheet({
+    super.key,
+    required this.delivery,
+    this.requirePhoto = false,
+  });
 
   final Delivery delivery;
+
+  /// When set, the stop cannot be closed until a photo has been taken. The
+  /// enforcement lives here rather than after the sheet closes, so the driver
+  /// is told before they fill it in, not after they tap the button.
+  final bool requirePhoto;
 
   /// Returns the captured proof, or null if the driver backed out.
   static Future<ProofOfDelivery?> show(
     BuildContext context,
-    Delivery delivery,
-  ) {
+    Delivery delivery, {
+    bool requirePhoto = false,
+  }) {
     return showAppSheet<ProofOfDelivery>(
       context,
       // A swipe-away here would discard a captured photo and a typed name.
       dismissible: false,
-      builder: (_) => CompleteDeliverySheet(delivery: delivery),
+      builder: (_) =>
+          CompleteDeliverySheet(delivery: delivery, requirePhoto: requirePhoto),
     );
   }
 
@@ -127,6 +138,7 @@ class _CompleteDeliverySheetState extends State<CompleteDeliverySheet> {
             _PhotoSlot(
               path: _photoPath,
               isBusy: _isCapturing,
+              required: widget.requirePhoto,
               onCapture: _capturePhoto,
               onClear: () => setState(() => _photoPath = null),
             ),
@@ -140,13 +152,27 @@ class _CompleteDeliverySheetState extends State<CompleteDeliverySheet> {
               ),
             ],
             const SizedBox(height: 20),
+            if (widget.requirePhoto && _photoPath == null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Text(
+                  'Your depot requires a photo before this stop can be '
+                  'closed.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
             FilledButton.icon(
-              onPressed: () => Navigator.of(context).pop((
-                recipientName: _recipientController.text.trim().isEmpty
-                    ? null
-                    : _recipientController.text.trim(),
-                photoPath: _photoPath,
-              )),
+              onPressed: widget.requirePhoto && _photoPath == null
+                  ? null
+                  : () => Navigator.of(context).pop((
+                      recipientName: _recipientController.text.trim().isEmpty
+                          ? null
+                          : _recipientController.text.trim(),
+                      photoPath: _photoPath,
+                    )),
               icon: const Icon(Icons.check),
               label: const Text('Mark as delivered'),
               style: FilledButton.styleFrom(
@@ -168,12 +194,14 @@ class _PhotoSlot extends StatelessWidget {
   const _PhotoSlot({
     required this.path,
     required this.isBusy,
+    required this.required,
     required this.onCapture,
     required this.onClear,
   });
 
   final String? path;
   final bool isBusy;
+  final bool required;
   final VoidCallback onCapture;
   final VoidCallback onClear;
 
@@ -221,8 +249,19 @@ class _PhotoSlot extends StatelessWidget {
               child: CircularProgressIndicator(strokeWidth: 2),
             )
           : const Icon(Icons.photo_camera_outlined),
-      label: Text(isBusy ? 'Opening camera…' : 'Add proof photo (optional)'),
-      style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+      label: Text(
+        isBusy
+            ? 'Opening camera…'
+            : required
+            ? 'Add proof photo (required)'
+            : 'Add proof photo (optional)',
+      ),
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size.fromHeight(52),
+        // Reads as an outstanding task rather than an optional extra.
+        side: required ? BorderSide(color: scheme.error, width: 1.5) : null,
+        foregroundColor: required ? scheme.error : null,
+      ),
     );
   }
 }

@@ -1,5 +1,8 @@
 name: build
 
+# Deliberately does NOT build APKs on a push to main: release.yml owns main,
+# and having both build would compile the same commit twice for every push.
+# Here, main pushes get the fast checks only.
 on:
   push:
     branches: [main]
@@ -51,6 +54,9 @@ jobs:
     name: split apks
     runs-on: ubuntu-latest
     needs: check
+    # Pull requests and manual runs only. A push to main is covered by
+    # release.yml, which builds and publishes the same artifacts.
+    if: github.event_name != 'push'
     steps:
       - uses: actions/checkout@v4
 

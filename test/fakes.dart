@@ -4,6 +4,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:logistics_app/data/delivery_repository.dart';
 import 'package:logistics_app/models/app_settings.dart';
 import 'package:logistics_app/models/delivery.dart';
+import 'package:logistics_app/models/shift.dart';
 import 'package:logistics_app/models/trip.dart';
 import 'package:logistics_app/models/trip_point.dart';
 import 'package:logistics_app/services/location_service.dart';
@@ -105,7 +106,49 @@ class FakeDeliveryRepository implements DeliveryRepository {
     deliveries.clear();
     trips.clear();
     points.clear();
+    shifts.clear();
   }
+
+  final Map<String, Shift> shifts = {};
+  var _nextShiftId = 0;
+
+  @override
+  Future<Shift?> activeShift() async {
+    for (final shift in shifts.values) {
+      if (shift.isActive) return shift;
+    }
+    return null;
+  }
+
+  @override
+  Future<Shift> startShift({
+    String? vehicleLabel,
+    bool startedByTag = false,
+  }) async {
+    if (await activeShift() != null) {
+      throw StateError('Already clocked on.');
+    }
+    final shift = Shift(
+      id: 'shift-${_nextShiftId++}',
+      startedAt: DateTime.now(),
+      vehicleLabel: vehicleLabel,
+      startedByTag: startedByTag,
+    );
+    shifts[shift.id] = shift;
+    return shift;
+  }
+
+  @override
+  Future<Shift> endShift(String shiftId) async {
+    final shift = shifts[shiftId];
+    if (shift == null) throw StateError('No such shift');
+    final ended = shift.copyWith(endedAt: DateTime.now());
+    shifts[shiftId] = ended;
+    return ended;
+  }
+
+  @override
+  Future<List<Shift>> fetchShifts() async => shifts.values.toList();
 
   @override
   Future<Trip> endTrip(String tripId, {required double distanceMeters}) async {

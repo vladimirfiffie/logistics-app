@@ -18,9 +18,14 @@
     <!-- Android 13+ gates the tracking notification behind a runtime grant. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
+    <!-- Tap a tag in the van to clock on. Entirely optional: the app works
+         fully on a phone with no NFC at all. -->
+    <uses-permission android:name="android.permission.NFC"/>
+
     <!-- GPS-only devices; the app still runs without hardware GPS. -->
     <uses-feature android:name="android.hardware.location.gps" android:required="false"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.nfc" android:required="false"/>
 
     <application
         android:label="Logistics"

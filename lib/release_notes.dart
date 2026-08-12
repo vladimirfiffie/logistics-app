@@ -64,10 +64,20 @@ class ReleaseNote {
 /// Newest first. The first entry is the current version.
 final releaseNotes = <ReleaseNote>[
   ReleaseNote(
-    version: '1.0.0-beta.2',
-    date: DateTime.utc(2026, 8, 11),
-    headline: 'A home screen, driving conditions, and a lot more control.',
+    version: '1.0.0-beta.3',
+    date: DateTime.utc(2026, 8, 12),
+    headline: 'Clock on with a tap, plus a home screen and driving conditions.',
     highlights: [
+      ReleaseChange(
+        'Clock on and off',
+        'A shift is tracked separately from the individual drops, so the app '
+            'knows how long you were actually working.',
+      ),
+      ReleaseChange(
+        'Tap a tag to start',
+        'Stick an NFC tag in the van and tap it to clock on. Completely '
+            'optional — there is always a button.',
+      ),
       ReleaseChange(
         'A new Home screen',
         'How the day is going, how far you have driven, what is next, and one '
@@ -97,6 +107,17 @@ final releaseNotes = <ReleaseNote>[
     ],
     fixes: [
       ReleaseChange(
+        'The photo requirement is honest',
+        'With "require a proof photo" on, the button said optional and then '
+            'refused the delivery. It now says required and blocks the button '
+            'until you have one.',
+      ),
+      ReleaseChange(
+        'Failed stops confirm too',
+        'Recording a stop as undelivered dropped you back to the list with no '
+            'confirmation it had registered.',
+      ),
+      ReleaseChange(
         'The location button works',
         'Tapping it on the live map did nothing until you had driven far '
             'enough for a new fix.',
@@ -115,6 +136,8 @@ final releaseNotes = <ReleaseNote>[
       'Add more stops from the manifest when you need a bigger round to test '
           'with.',
       'Replay the introduction any time from Settings.',
+      'Onboarding now asks for your name and van, and can write an NFC tag '
+          'for you on the spot.',
       'Require a proof photo before a stop can be closed, if your depot works '
           'that way.',
       'Your stops, routes and photos still never leave the phone. The weather '

@@ -5,10 +5,12 @@ import 'package:provider/provider.dart';
 import '../data/delivery_repository.dart';
 import '../data/seed_data.dart';
 import '../models/app_settings.dart';
+import '../models/van_tag.dart';
 import '../release_notes.dart';
 import '../services/app_haptics.dart';
 import '../services/app_preferences.dart';
 import '../services/location_service.dart';
+import '../services/nfc_service.dart';
 import '../services/notification_service.dart';
 import '../state/delivery_controller.dart';
 import '../state/settings_controller.dart';
@@ -127,6 +129,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             hint: 'e.g. LT21 KXR, or Round 4',
             onChanged: controller.setVehicleLabel,
           ),
+
+          _TagTile(vehicleLabel: settings.vehicleLabel),
 
           const _SectionHeader('Tracking'),
           _ChoiceTile<TrackingAccuracy>(
@@ -589,6 +593,99 @@ class _TextTile extends StatelessWidget {
     );
     controller.dispose();
     if (result != null) onChanged(result);
+  }
+}
+
+/// Writes a van tag. Entirely optional — everything works without one, so the
+/// tile explains what it buys rather than presenting it as setup to complete.
+class _TagTile extends StatefulWidget {
+  const _TagTile({required this.vehicleLabel});
+
+  final String vehicleLabel;
+
+  @override
+  State<_TagTile> createState() => _TagTileState();
+}
+
+class _TagTileState extends State<_TagTile> {
+  NfcReadiness? _readiness;
+  bool _writing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _check();
+  }
+
+  Future<void> _check() async {
+    final readiness = await context.read<NfcService>().readiness();
+    if (mounted) setState(() => _readiness = readiness);
+  }
+
+  Future<void> _write() async {
+    final label = widget.vehicleLabel.trim();
+    if (label.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Set "Van or round" above first — it goes on the tag.'),
+        ),
+      );
+      return;
+    }
+
+    final nfc = context.read<NfcService>();
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _writing = true);
+
+    final problem = await nfc.writeVanTag(VanTag(label: label));
+
+    if (!mounted) return;
+    setState(() => _writing = false);
+    if (problem == null) {
+      await AppHaptics.delivered();
+    } else {
+      await AppHaptics.error();
+    }
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          problem ?? 'Tag written. Stick it somewhere you can reach.',
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final readiness = _readiness;
+    final usable = readiness == NfcReadiness.ready;
+
+    return ListTile(
+      leading: _writing
+          ? const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.nfc),
+      title: const Text('Van tag'),
+      subtitle: Text(switch (readiness) {
+        null => 'Checking NFC…',
+        NfcReadiness.ready when _writing =>
+          'Hold the tag against the back of your phone.',
+        NfcReadiness.ready =>
+          'Optional. Write a sticker for the van, then tap it to clock on.',
+        final NfcReadiness other =>
+          '${other.message} Clock on by tapping '
+              'the button instead.',
+      }),
+      isThreeLine: true,
+      trailing: usable && !_writing
+          ? TextButton(onPressed: _write, child: const Text('Write'))
+          : null,
+      onTap: usable && !_writing ? _write : null,
+      enabled: usable,
+    );
   }
 }
 

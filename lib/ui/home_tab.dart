@@ -5,13 +5,17 @@ import 'package:provider/provider.dart';
 import '../data/delivery_repository.dart';
 import '../models/app_settings.dart';
 import '../models/delivery.dart';
+import '../models/shift.dart';
 import '../models/trip.dart';
+import '../services/app_haptics.dart';
 import '../services/location_service.dart';
 import '../services/weather_service.dart';
 import '../state/delivery_controller.dart';
 import '../state/settings_controller.dart';
+import '../state/shift_controller.dart';
 import '../state/tracking_controller.dart';
 import 'delivery_detail_sheet.dart';
+import 'nfc_scan_sheet.dart';
 import 'formatters.dart';
 import 'settings_screen.dart';
 import 'widgets/status_chip.dart';
@@ -44,6 +48,40 @@ class _HomeTabState extends State<HomeTab> {
     super.initState();
     _loadTrips();
     _loadWeather();
+  }
+
+  /// Clocking on offers the tag as a shortcut and never requires it — the
+  /// sheet always carries a "start without a tag" button, so a phone with no
+  /// NFC or a van with no sticker is not a dead end.
+  Future<void> _toggleShift() async {
+    final shifts = context.read<ShiftController>();
+    final settings = context.read<SettingsController>().settings;
+
+    if (shifts.isOnShift) {
+      await shifts.end();
+      await AppHaptics.trackingStopped();
+      return;
+    }
+
+    final result = await NfcScanSheet.show(
+      context,
+      title: 'Start your shift',
+      subtitle: 'Tap the tag in your van, or start without one.',
+      manualLabel: 'Start without a tag',
+    );
+    if (result == null || !mounted) return;
+
+    final vehicle = switch (result) {
+      NfcSheetTag(:final tag) => tag.label,
+      NfcSheetManual() =>
+        settings.vehicleLabel.isEmpty ? null : settings.vehicleLabel,
+    };
+
+    final started = await shifts.start(
+      vehicleLabel: vehicle,
+      startedByTag: result is NfcSheetTag,
+    );
+    if (started != null) await AppHaptics.trackingStarted();
   }
 
   /// Best-effort. Uses the cached fix rather than requesting a fresh one — a
@@ -184,6 +222,13 @@ class _HomeTabState extends State<HomeTab> {
                 isLoading: _loadingWeather,
               ).animate().fadeIn(delay: 60.ms, duration: 320.ms),
             ),
+
+          SliverToBoxAdapter(
+            child: _ShiftCard(
+              shifts: context.watch<ShiftController>(),
+              onToggle: _toggleShift,
+            ).animate().fadeIn(delay: 40.ms, duration: 300.ms),
+          ),
 
           SliverToBoxAdapter(
             child: _ProgressCard(
@@ -408,6 +453,90 @@ class _ProgressCard extends StatelessWidget {
                   ],
                 ),
               ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Clock on and off. Shown above everything else because it is the first and
+/// last thing a driver does, and because "am I on the clock?" should never
+/// need looking for.
+class _ShiftCard extends StatelessWidget {
+  const _ShiftCard({required this.shifts, required this.onToggle});
+
+  final ShiftController shifts;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final on = shifts.isOnShift;
+    final shift = shifts.current;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+      child: Card(
+        elevation: 0,
+        color: on ? scheme.tertiaryContainer : scheme.surfaceContainerHighest,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Icon(
+                on ? Icons.timer_outlined : Icons.play_circle_outline,
+                color: on
+                    ? scheme.onTertiaryContainer
+                    : scheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      on ? 'On shift' : 'Not on shift',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: on ? scheme.onTertiaryContainer : null,
+                      ),
+                    ),
+                    Text(
+                      switch ((on, shift)) {
+                        (true, final Shift current) => [
+                          formatDuration(current.duration),
+                          if (current.vehicleLabel case final String van) van,
+                          if (current.startedByTag) 'tag',
+                        ].join(' · '),
+                        _ => 'Tap your van tag, or start without one.',
+                      },
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: on
+                            ? scheme.onTertiaryContainer
+                            : scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              shifts.isBusy
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : FilledButton(
+                      onPressed: onToggle,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: on ? scheme.error : scheme.primary,
+                        foregroundColor: on ? scheme.onError : scheme.onPrimary,
+                      ),
+                      child: Text(on ? 'Clock off' : 'Clock on'),
+                    ),
             ],
           ),
         ),

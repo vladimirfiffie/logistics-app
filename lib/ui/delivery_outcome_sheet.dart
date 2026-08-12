@@ -7,20 +7,22 @@ import '../models/trip.dart';
 import 'formatters.dart';
 import 'widgets/app_sheet.dart';
 
-/// The moment a stop is closed out successfully.
+/// The moment a stop is closed out, either way.
 ///
 /// Worth the two seconds: a delivery round is a long grind of near-identical
 /// actions, and a clear, unmistakable "that one is done" is the difference
-/// between confidence and double-checking. It auto-dismisses so it never
-/// becomes another tap.
-class DeliverySuccessSheet extends StatelessWidget {
-  const DeliverySuccessSheet({
+/// between confidence and double-checking. A stop that could *not* be
+/// delivered gets the same confirmation for the same reason — silently
+/// returning to the list leaves the driver wondering whether it registered.
+class DeliveryOutcomeSheet extends StatelessWidget {
+  const DeliveryOutcomeSheet({
     super.key,
     required this.delivery,
     required this.trip,
     required this.unit,
     required this.remainingStops,
     this.nextStop,
+    this.failureReason,
   });
 
   final Delivery delivery;
@@ -29,6 +31,12 @@ class DeliverySuccessSheet extends StatelessWidget {
   final int remainingStops;
   final Delivery? nextStop;
 
+  /// Set when the stop could not be delivered. Switches the whole sheet from
+  /// celebration to acknowledgement.
+  final String? failureReason;
+
+  bool get _failed => failureReason != null;
+
   static Future<void> show(
     BuildContext context, {
     required Delivery delivery,
@@ -36,16 +44,18 @@ class DeliverySuccessSheet extends StatelessWidget {
     required DistanceUnit unit,
     required int remainingStops,
     Delivery? nextStop,
+    String? failureReason,
   }) {
     return showAppSheet<void>(
       context,
       maxHeightFactor: 0.75,
-      builder: (_) => DeliverySuccessSheet(
+      builder: (_) => DeliveryOutcomeSheet(
         delivery: delivery,
         trip: trip,
         unit: unit,
         remainingStops: remainingStops,
         nextStop: nextStop,
+        failureReason: failureReason,
       ),
     );
   }
@@ -67,29 +77,36 @@ class DeliverySuccessSheet extends StatelessWidget {
                       width: 88,
                       height: 88,
                       decoration: BoxDecoration(
-                        color: scheme.tertiaryContainer,
+                        color: _failed
+                            ? scheme.errorContainer
+                            : scheme.tertiaryContainer,
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
-                        Icons.check_rounded,
+                        _failed
+                            ? Icons.report_gmailerrorred_rounded
+                            : Icons.check_rounded,
                         size: 52,
-                        color: scheme.onTertiaryContainer,
+                        color: _failed
+                            ? scheme.onErrorContainer
+                            : scheme.onTertiaryContainer,
                       ),
                     )
                     .animate()
-                    // Overshoot then settle — a linear grow reads as a loading
-                    // spinner rather than a confirmation.
+                    // A success overshoots and settles; a failure just fades
+                    // up. Bouncing at someone whose delivery went wrong reads
+                    // as gloating.
                     .scale(
-                      duration: 420.ms,
-                      curve: Curves.elasticOut,
-                      begin: const Offset(0.4, 0.4),
+                      duration: _failed ? 220.ms : 420.ms,
+                      curve: _failed ? Curves.easeOut : Curves.elasticOut,
+                      begin: Offset(_failed ? 0.9 : 0.4, _failed ? 0.9 : 0.4),
                       end: const Offset(1, 1),
                     )
                     .fadeIn(duration: 180.ms),
           ),
           const SizedBox(height: 18),
           Text(
-            'Delivered',
+            _failed ? 'Not delivered' : 'Delivered',
             textAlign: TextAlign.center,
             style: theme.textTheme.headlineSmall?.copyWith(
               fontWeight: FontWeight.w700,
@@ -104,11 +121,30 @@ class DeliverySuccessSheet extends StatelessWidget {
             ),
           ).animate().fadeIn(delay: 220.ms, duration: 240.ms),
 
+          if (failureReason case final String reason) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: scheme.errorContainer,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                'Recorded as: $reason',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: scheme.onErrorContainer,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ).animate().fadeIn(delay: 260.ms, duration: 240.ms),
+          ],
+
           const SizedBox(height: 22),
           Row(
             children: [
               _Stat(
-                label: 'Driven',
+                label: _failed ? 'Drove' : 'Driven',
                 value: trip == null
                     ? '—'
                     : formatDistance(trip!.distanceMeters, unit: unit),
@@ -176,7 +212,9 @@ class DeliverySuccessSheet extends StatelessWidget {
           ] else ...[
             const SizedBox(height: 20),
             Text(
-              "That's the whole round done.",
+              _failed
+                  ? 'That was the last stop on the round.'
+                  : "That's the whole round done.",
               textAlign: TextAlign.center,
               style: theme.textTheme.titleSmall?.copyWith(
                 color: scheme.primary,
