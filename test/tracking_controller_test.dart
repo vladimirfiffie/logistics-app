@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:logistics_app/models/app_settings.dart';
 import 'package:logistics_app/models/delivery.dart';
 import 'package:logistics_app/models/trip.dart';
 import 'package:logistics_app/services/location_service.dart';
@@ -11,14 +12,17 @@ void main() {
   late FakeLocationService location;
   late TrackingController controller;
   late int manifestRefreshes;
+  late TrackingAccuracy accuracy;
 
   setUp(() {
     repository = FakeDeliveryRepository();
     location = FakeLocationService();
     manifestRefreshes = 0;
+    accuracy = TrackingAccuracy.balanced;
     controller = TrackingController(
       repository: repository,
       locationService: location,
+      accuracy: () => accuracy,
       onManifestChanged: () async => manifestRefreshes++,
     );
   });
@@ -49,6 +53,18 @@ void main() {
       await controller.start(delivery);
 
       expect(location.lastNotificationText, contains('Harlow & Sons'));
+    });
+
+    test('reads the accuracy setting at start, not at construction', () async {
+      final delivery = makeDelivery();
+      await repository.saveDelivery(delivery);
+      // Changed after the controller was built — a trip started now must use
+      // the new value.
+      accuracy = TrackingAccuracy.saver;
+
+      await controller.start(delivery);
+
+      expect(location.lastAccuracy, TrackingAccuracy.saver);
     });
 
     test('refuses to start when permission is denied', () async {

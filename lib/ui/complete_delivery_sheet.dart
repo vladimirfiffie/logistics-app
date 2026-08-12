@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../models/delivery.dart';
+import '../services/app_haptics.dart';
 import 'widgets/app_sheet.dart';
 
 /// What the driver captured when closing out a stop.
@@ -60,6 +61,7 @@ class _CompleteDeliverySheetState extends State<CompleteDeliverySheet> {
       );
       if (shot == null) return;
       final stored = await _persist(shot);
+      await AppHaptics.captured();
       if (mounted) setState(() => _photoPath = stored);
     } catch (error) {
       if (mounted) {

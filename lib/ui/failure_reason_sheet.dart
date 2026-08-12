@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/app_haptics.dart';
 import 'widgets/app_sheet.dart';
 
 /// Asks why a stop could not be completed.
@@ -71,7 +72,10 @@ class _FailureReasonSheetState extends State<FailureReasonSheet> {
                   ChoiceChip(
                     label: Text(reason),
                     selected: _selected == reason,
-                    onSelected: (_) => setState(() => _selected = reason),
+                    onSelected: (_) {
+                      AppHaptics.select();
+                      setState(() => _selected = reason);
+                    },
                   ),
               ],
             ),

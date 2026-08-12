@@ -3,10 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
+import 'package:haptic_kit/haptic_kit.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../models/delivery.dart';
+import '../services/app_haptics.dart';
 import '../services/location_service.dart';
 import '../state/tracking_controller.dart';
+import '../state/settings_controller.dart';
 import 'delivery_actions.dart';
 import 'formatters.dart';
 import 'widgets/stat_tile.dart';
@@ -29,6 +33,9 @@ class _LiveTabState extends State<LiveTab> {
   Timer? _clock;
   bool _followDriver = true;
   bool _backgroundPermissionGranted = true;
+  int _seenFixes = 0;
+  bool _wakelockOn = false;
+  TrackingController? _tracking;
 
   @override
   void initState() {
@@ -39,6 +46,29 @@ class _LiveTabState extends State<LiveTab> {
       }
     });
     _checkBackgroundPermission();
+    _tracking = context.read<TrackingController>()..addListener(_onTracking);
+  }
+
+  /// Buzzes the moment the first fix lands, so the driver knows tracking is
+  /// genuinely live without looking at the screen. Also drives the wakelock,
+  /// which has to follow both the setting and whether a trip is running.
+  void _onTracking() {
+    final tracking = _tracking;
+    if (tracking == null) return;
+
+    final fixes = tracking.points.length;
+    if (_seenFixes == 0 && fixes > 0) AppHaptics.firstFix();
+    _seenFixes = fixes;
+
+    _syncWakelock(tracking.isTracking);
+  }
+
+  void _syncWakelock(bool isTracking) {
+    final wanted =
+        isTracking && context.read<SettingsController>().settings.keepScreenOn;
+    if (wanted == _wakelockOn) return;
+    _wakelockOn = wanted;
+    WakelockPlus.toggle(enable: wanted);
   }
 
   Future<void> _checkBackgroundPermission() async {
@@ -51,6 +81,9 @@ class _LiveTabState extends State<LiveTab> {
   @override
   void dispose() {
     _clock?.cancel();
+    _tracking?.removeListener(_onTracking);
+    // Never leave the screen pinned awake after leaving this tab.
+    if (_wakelockOn) WakelockPlus.disable();
     super.dispose();
   }
 
@@ -301,6 +334,7 @@ class _TripPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final unit = context.distanceUnit;
     final fix = tracking.lastPosition;
     final remaining = tracking.metersToDestination;
 
@@ -319,7 +353,9 @@ class _TripPanel extends StatelessWidget {
                 Expanded(
                   child: StatTile(
                     label: 'TO GO',
-                    value: remaining == null ? '—' : formatDistance(remaining),
+                    value: remaining == null
+                        ? '—'
+                        : formatDistance(remaining, unit: unit),
                     icon: Icons.flag_outlined,
                     emphasis: true,
                   ),
@@ -327,7 +363,7 @@ class _TripPanel extends StatelessWidget {
                 Expanded(
                   child: StatTile(
                     label: 'DRIVEN',
-                    value: formatDistance(tracking.distanceMeters),
+                    value: formatDistance(tracking.distanceMeters, unit: unit),
                     icon: Icons.route_outlined,
                   ),
                 ),
@@ -347,14 +383,16 @@ class _TripPanel extends StatelessWidget {
                 Expanded(
                   child: StatTile(
                     label: 'SPEED',
-                    value: formatSpeed(fix?.speed ?? 0),
+                    value: formatSpeed(fix?.speed ?? 0, unit: unit),
                     icon: Icons.speed,
                   ),
                 ),
                 Expanded(
                   child: StatTile(
                     label: 'ACCURACY',
-                    value: fix == null ? '—' : formatAccuracy(fix.accuracy),
+                    value: fix == null
+                        ? '—'
+                        : formatAccuracy(fix.accuracy, unit: unit),
                     icon: Icons.my_location,
                   ),
                 ),
@@ -399,14 +437,26 @@ class _TripPanel extends StatelessWidget {
             ],
 
             const SizedBox(height: 14),
-            FilledButton.icon(
-              onPressed: tracking.isBusy ? null : onArrived,
-              icon: const Icon(Icons.check_circle_outline),
-              label: const Text('Arrived — complete delivery'),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(50),
+            // A tap is easy to hit by accident on a phone bouncing in a van,
+            // and closing out the wrong stop is a nuisance to undo — so the
+            // default is a deliberate slide.
+            if (context.appSettings.confirmWithSlide)
+              SlideToConfirm(
+                label: 'Slide when you have arrived',
+                onConfirmed: tracking.isBusy ? () {} : onArrived,
+                trackColor: theme.colorScheme.surfaceContainerHighest,
+                handleColor: theme.colorScheme.primary,
+                textColor: theme.colorScheme.onSurfaceVariant,
+              )
+            else
+              FilledButton.icon(
+                onPressed: tracking.isBusy ? null : onArrived,
+                icon: const Icon(Icons.check_circle_outline),
+                label: const Text('Arrived — complete delivery'),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(50),
+                ),
               ),
-            ),
             const SizedBox(height: 6),
             Row(
               children: [

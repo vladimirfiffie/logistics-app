@@ -3,9 +3,11 @@ import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 
 import '../models/delivery.dart';
+import '../services/app_haptics.dart';
 import '../services/location_service.dart';
 import '../state/delivery_controller.dart';
 import 'delivery_detail_sheet.dart';
+import 'settings_screen.dart';
 import 'widgets/delivery_card.dart';
 
 enum _SortMode {
@@ -95,11 +97,19 @@ class _ManifestTabState extends State<ManifestTab> {
           SliverAppBar.large(
             title: const Text("Today's run"),
             actions: [
+              IconButton(
+                onPressed: () => SettingsScreen.show(context),
+                icon: const Icon(Icons.settings_outlined),
+                tooltip: 'Settings',
+              ),
               PopupMenuButton<_SortMode>(
                 initialValue: _sort,
                 icon: const Icon(Icons.sort),
                 tooltip: 'Sort stops',
-                onSelected: (mode) => setState(() => _sort = mode),
+                onSelected: (mode) {
+                  AppHaptics.select();
+                  setState(() => _sort = mode);
+                },
                 itemBuilder: (_) => [
                   for (final mode in _SortMode.values)
                     PopupMenuItem(

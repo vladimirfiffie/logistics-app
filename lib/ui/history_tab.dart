@@ -6,6 +6,7 @@ import '../models/delivery.dart';
 import '../models/trip.dart';
 import '../release_notes.dart';
 import '../state/delivery_controller.dart';
+import '../state/settings_controller.dart';
 import 'delivery_detail_sheet.dart';
 import 'formatters.dart';
 import 'whats_new_sheet.dart';
@@ -90,7 +91,10 @@ class _HistoryTabState extends State<HistoryTab> {
                       ),
                       _Total(
                         label: 'Distance',
-                        value: formatDistance(_totalDistance),
+                        value: formatDistance(
+                          _totalDistance,
+                          unit: context.distanceUnit,
+                        ),
                       ),
                       _Total(
                         label: 'Driving',
@@ -238,7 +242,8 @@ class _HistoryTile extends StatelessWidget {
         [
           delivery.reference,
           if (completedAt != null) formatTime(completedAt),
-          if (trip != null) formatDistance(trip!.distanceMeters),
+          if (trip != null)
+            formatDistance(trip!.distanceMeters, unit: context.distanceUnit),
           if (delivery.failureReason case final String reason) reason,
         ].join(' · '),
         maxLines: 1,

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/delivery.dart';
+import '../services/app_haptics.dart';
 import '../state/delivery_controller.dart';
 import '../state/tracking_controller.dart';
 import 'complete_delivery_sheet.dart';
@@ -23,6 +24,7 @@ Future<bool> completeDelivery(BuildContext context, Delivery delivery) async {
     recipientName: proof.recipientName,
     proofPhotoPath: proof.photoPath,
   );
+  await AppHaptics.delivered();
   return true;
 }
 
@@ -35,6 +37,7 @@ Future<bool> failDelivery(BuildContext context, Delivery delivery) async {
   final deliveries = context.read<DeliveryController>();
   await _endTripFor(context, delivery);
   await deliveries.markFailed(delivery, reason: reason);
+  await AppHaptics.deliveryFailed();
   return true;
 }
 

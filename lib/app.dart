@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'data/delivery_repository.dart';
 import 'services/location_service.dart';
 import 'state/delivery_controller.dart';
+import 'state/settings_controller.dart';
 import 'state/tracking_controller.dart';
 import 'ui/startup_gate.dart';
 
@@ -13,10 +14,16 @@ class LogisticsApp extends StatelessWidget {
   const LogisticsApp({
     super.key,
     required this.repository,
+    required this.settingsController,
     this.locationService = const LocationService(),
   });
 
   final DeliveryRepository repository;
+
+  /// Created and loaded before `runApp` so the first frame is already in the
+  /// right theme, rather than flashing light and snapping to dark.
+  final SettingsController settingsController;
+
   final LocationService locationService;
 
   static const _seedColor = Color(0xFF1565C0);
@@ -27,6 +34,9 @@ class LogisticsApp extends StatelessWidget {
       providers: [
         Provider<DeliveryRepository>.value(value: repository),
         Provider<LocationService>.value(value: locationService),
+        ChangeNotifierProvider<SettingsController>.value(
+          value: settingsController,
+        ),
         ChangeNotifierProvider<DeliveryController>(
           create: (_) => DeliveryController(repository),
         ),
@@ -37,17 +47,23 @@ class LogisticsApp extends StatelessWidget {
           create: (context) => TrackingController(
             repository: repository,
             locationService: locationService,
+            accuracy: () => settingsController.settings.accuracy,
             onManifestChanged: () =>
                 context.read<DeliveryController>().refresh(),
           ),
         ),
       ],
-      child: MaterialApp(
-        title: 'Logistics',
-        debugShowCheckedModeBanner: false,
-        theme: _theme(Brightness.light),
-        darkTheme: _theme(Brightness.dark),
-        home: const StartupGate(),
+      // Rebuilds the whole app when the theme choice changes, which is the
+      // one setting that cannot be read locally where it is used.
+      child: Consumer<SettingsController>(
+        builder: (context, settings, _) => MaterialApp(
+          title: 'Logistics',
+          debugShowCheckedModeBanner: false,
+          theme: _theme(Brightness.light),
+          darkTheme: _theme(Brightness.dark),
+          themeMode: settings.settings.theme.mode,
+          home: const StartupGate(),
+        ),
       ),
     );
   }

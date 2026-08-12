@@ -1,6 +1,8 @@
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../models/app_settings.dart';
+
 /// Why the app can or cannot read the driver's position right now.
 enum LocationReadiness {
   /// Good to go — at least while-in-use permission is granted.
@@ -40,10 +42,6 @@ enum LocationReadiness {
 class LocationService {
   const LocationService();
 
-  /// Distance in metres the driver must move before a new fix is emitted.
-  /// Filters out the jitter a stationary phone produces.
-  static const _distanceFilterMeters = 10;
-
   /// Asks for permission if needed and reports whether tracking can proceed.
   Future<LocationReadiness> ensureReady() async {
     if (!await Geolocator.isLocationServiceEnabled()) {
@@ -55,14 +53,28 @@ class LocationService {
       permission = await Geolocator.requestPermission();
     }
 
-    return switch (permission) {
-      LocationPermission.always ||
-      LocationPermission.whileInUse => LocationReadiness.ready,
-      LocationPermission.deniedForever => LocationReadiness.deniedForever,
-      LocationPermission.denied ||
-      LocationPermission.unableToDetermine => LocationReadiness.denied,
-    };
+    return _readinessFor(permission);
   }
+
+  /// Reports the current state **without prompting**.
+  ///
+  /// Used by the settings screen, where someone who came to change the theme
+  /// should not be ambushed by a permission dialog.
+  Future<LocationReadiness> currentReadiness() async {
+    if (!await Geolocator.isLocationServiceEnabled()) {
+      return LocationReadiness.serviceDisabled;
+    }
+    return _readinessFor(await Geolocator.checkPermission());
+  }
+
+  LocationReadiness _readinessFor(LocationPermission permission) =>
+      switch (permission) {
+        LocationPermission.always ||
+        LocationPermission.whileInUse => LocationReadiness.ready,
+        LocationPermission.deniedForever => LocationReadiness.deniedForever,
+        LocationPermission.denied ||
+        LocationPermission.unableToDetermine => LocationReadiness.denied,
+      };
 
   /// Asks for the "allow all the time" upgrade, which Android requires as a
   /// second, separate prompt after while-in-use is already granted.
@@ -98,12 +110,19 @@ class LocationService {
   /// On Android this runs as a foreground service with a persistent
   /// notification, which is what keeps location flowing when the driver
   /// switches to their nav app or pockets the phone.
-  Stream<Position> trackPosition({required String notificationText}) {
+  Stream<Position> trackPosition({
+    required String notificationText,
+    TrackingAccuracy accuracy = TrackingAccuracy.balanced,
+  }) {
     return Geolocator.getPositionStream(
       locationSettings: AndroidSettings(
-        accuracy: LocationAccuracy.bestForNavigation,
-        distanceFilter: _distanceFilterMeters,
-        intervalDuration: const Duration(seconds: 5),
+        accuracy: switch (accuracy) {
+          TrackingAccuracy.precise => LocationAccuracy.bestForNavigation,
+          TrackingAccuracy.balanced => LocationAccuracy.high,
+          TrackingAccuracy.saver => LocationAccuracy.medium,
+        },
+        distanceFilter: accuracy.distanceFilterMeters,
+        intervalDuration: accuracy.interval,
         foregroundNotificationConfig: ForegroundNotificationConfig(
           notificationTitle: 'Delivery tracking active',
           notificationText: notificationText,

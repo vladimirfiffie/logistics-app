@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:geolocator/geolocator.dart';
 import 'package:logistics_app/data/delivery_repository.dart';
+import 'package:logistics_app/models/app_settings.dart';
 import 'package:logistics_app/models/delivery.dart';
 import 'package:logistics_app/models/trip.dart';
 import 'package:logistics_app/models/trip_point.dart';
@@ -124,6 +125,9 @@ class FakeLocationService implements LocationService {
   Future<LocationReadiness> ensureReady() async => readiness;
 
   @override
+  Future<LocationReadiness> currentReadiness() async => readiness;
+
+  @override
   Future<bool> requestBackgroundPermission() async {
     backgroundGranted = true;
     return true;
@@ -150,9 +154,16 @@ class FakeLocationService implements LocationService {
   @override
   Future<Position?> lastKnownPosition() async => null;
 
+  /// The accuracy the controller asked for on the most recent start.
+  TrackingAccuracy? lastAccuracy;
+
   @override
-  Stream<Position> trackPosition({required String notificationText}) {
+  Stream<Position> trackPosition({
+    required String notificationText,
+    TrackingAccuracy accuracy = TrackingAccuracy.balanced,
+  }) {
     lastNotificationText = notificationText;
+    lastAccuracy = accuracy;
     return _positions.stream;
   }
 

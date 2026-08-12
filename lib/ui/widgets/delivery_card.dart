@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/delivery.dart';
 import '../formatters.dart';
+import '../../state/settings_controller.dart';
 import 'status_chip.dart';
 
 /// One stop in the manifest list.
@@ -91,7 +92,10 @@ class DeliveryCard extends StatelessWidget {
                   if (distanceMeters != null)
                     _Meta(
                       icon: Icons.near_me_outlined,
-                      text: formatDistance(distanceMeters!),
+                      text: formatDistance(
+                        distanceMeters!,
+                        unit: context.distanceUnit,
+                      ),
                       highlight: true,
                     ),
                 ],

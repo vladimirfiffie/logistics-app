@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../data/delivery_repository.dart';
+import '../models/app_settings.dart';
 import '../models/delivery.dart';
 import '../models/trip.dart';
 import '../models/trip_point.dart';
@@ -15,12 +16,18 @@ class TrackingController extends ChangeNotifier {
   TrackingController({
     required DeliveryRepository repository,
     required LocationService locationService,
+    required TrackingAccuracy Function() accuracy,
     this.onManifestChanged,
   }) : _repository = repository,
-       _location = locationService;
+       _location = locationService,
+       _accuracy = accuracy;
 
   final DeliveryRepository _repository;
   final LocationService _location;
+
+  /// Read lazily rather than captured, so a trip started after the driver
+  /// changes the setting uses the new value without rewiring providers.
+  final TrackingAccuracy Function() _accuracy;
 
   /// Called when a start/stop changes a delivery's status, so the manifest
   /// list can re-read it.
@@ -182,7 +189,10 @@ class TrackingController extends ChangeNotifier {
     _subscription?.cancel();
     final label = _delivery?.customerName ?? 'Delivery in progress';
     _subscription = _location
-        .trackPosition(notificationText: 'On the way to $label')
+        .trackPosition(
+          notificationText: 'On the way to $label',
+          accuracy: _accuracy(),
+        )
         .listen(
           _onPosition,
           onError: (Object error) {

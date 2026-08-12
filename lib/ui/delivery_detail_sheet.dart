@@ -9,8 +9,10 @@ import 'package:url_launcher/url_launcher.dart';
 import '../data/delivery_repository.dart';
 import '../models/delivery.dart';
 import '../models/trip.dart';
+import '../services/app_haptics.dart';
 import '../services/location_service.dart';
 import '../state/delivery_controller.dart';
+import '../state/settings_controller.dart';
 import '../state/tracking_controller.dart';
 import 'delivery_actions.dart';
 import 'formatters.dart';
@@ -226,6 +228,11 @@ class _DeliveryDetailSheetState extends State<DeliveryDetailSheet> {
     final navigator = Navigator.of(context);
 
     final started = await tracking.start(delivery);
+    if (started) {
+      await AppHaptics.trackingStarted();
+    } else {
+      await AppHaptics.error();
+    }
     if (!mounted) return;
 
     if (started) {
@@ -423,7 +430,8 @@ class _TripSummary extends StatelessWidget {
             if (trip.endedAt case final DateTime endedAt)
               Text('Finished ${formatDateTime(endedAt)}'),
             Text(
-              'Distance driven ${formatDistance(trip.distanceMeters)} '
+              'Distance driven '
+              '${formatDistance(trip.distanceMeters, unit: context.distanceUnit)} '
               'over ${formatDuration(trip.duration)}',
             ),
           ],
