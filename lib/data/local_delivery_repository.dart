@@ -1,8 +1,12 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/delivery.dart';
 import '../models/shift.dart';
+import '../models/shift_break.dart';
 import '../models/trip.dart';
 import '../models/trip_point.dart';
 import 'delivery_repository.dart';
@@ -129,12 +133,44 @@ class LocalDeliveryRepository implements DeliveryRepository {
 
   @override
   Future<int> deleteClosedDeliveries() async {
-    // Trips and breadcrumbs go with them via ON DELETE CASCADE.
-    return _db.delete(
+    // Read the attachments before the rows go: ON DELETE CASCADE cleans up
+    // trips and breadcrumbs, but SQLite knows nothing about the files on
+    // disk, and a deleted stop's proof photo has no business outliving it.
+    final closed = await _db.query(
+      'deliveries',
+      columns: ['proof_photo_path', 'signature_path'],
+      where: 'status IN (?, ?)',
+      whereArgs: [DeliveryStatus.delivered.name, DeliveryStatus.failed.name],
+    );
+
+    final removed = await _db.delete(
       'deliveries',
       where: 'status IN (?, ?)',
       whereArgs: [DeliveryStatus.delivered.name, DeliveryStatus.failed.name],
     );
+
+    await _deleteFiles([
+      for (final row in closed) ...[
+        row['proof_photo_path'] as String?,
+        row['signature_path'] as String?,
+      ],
+    ]);
+    return removed;
+  }
+
+  /// Best-effort. A file that has already gone, or one on storage that has
+  /// been unmounted, must not turn "clear history" into an error — the rows
+  /// are the record, the files are only attachments.
+  Future<void> _deleteFiles(Iterable<String?> paths) async {
+    for (final path in paths) {
+      if (path == null || path.isEmpty) continue;
+      try {
+        final file = File(path);
+        if (file.existsSync()) await file.delete();
+      } catch (error) {
+        debugPrint('could not delete attachment $path: $error');
+      }
+    }
   }
 
   @override
@@ -169,19 +205,40 @@ class LocalDeliveryRepository implements DeliveryRepository {
 
   @override
   Future<Shift> endShift(String shiftId) async {
-    await _db.update(
-      'shifts',
-      {'ended_at': DateTime.now().toUtc().millisecondsSinceEpoch},
-      where: 'id = ?',
-      whereArgs: [shiftId],
-    );
-    final rows = await _db.query(
-      'shifts',
-      where: 'id = ?',
-      whereArgs: [shiftId],
-      limit: 1,
-    );
-    if (rows.isEmpty) throw StateError('Shift $shiftId no longer exists.');
+    final rows = await _db.transaction((txn) async {
+      // `ended_at IS NULL` in the WHERE clause, not just the id: ending an
+      // already-closed shift would otherwise silently rewrite the end time on
+      // a timesheet the driver is paid from.
+      final closed = await txn.update(
+        'shifts',
+        {'ended_at': DateTime.now().toUtc().millisecondsSinceEpoch},
+        where: 'id = ? AND ended_at IS NULL',
+        whereArgs: [shiftId],
+      );
+
+      final found = await txn.query(
+        'shifts',
+        where: 'id = ?',
+        whereArgs: [shiftId],
+        limit: 1,
+      );
+      if (found.isEmpty) throw StateError('Shift $shiftId no longer exists.');
+      if (closed == 0) {
+        throw StateError('Shift $shiftId was already clocked off.');
+      }
+
+      // A break left running ends with the shift rather than being left open
+      // forever and counting against every future total.
+      await txn.update(
+        'breaks',
+        {'ended_at': DateTime.now().toUtc().millisecondsSinceEpoch},
+        where: 'shift_id = ? AND ended_at IS NULL',
+        whereArgs: [shiftId],
+      );
+
+      return found;
+    });
+
     return Shift.fromMap(rows.first);
   }
 
@@ -192,15 +249,113 @@ class LocalDeliveryRepository implements DeliveryRepository {
   }
 
   @override
+  Future<ShiftBreak?> activeBreak(String shiftId) async {
+    final rows = await _db.query(
+      'breaks',
+      where: 'shift_id = ? AND ended_at IS NULL',
+      whereArgs: [shiftId],
+      orderBy: 'started_at DESC',
+      limit: 1,
+    );
+    return rows.isEmpty ? null : ShiftBreak.fromMap(rows.first);
+  }
+
+  @override
+  Future<ShiftBreak> startBreak(
+    String shiftId, {
+    BreakKind kind = BreakKind.rest,
+  }) async {
+    final existing = await activeBreak(shiftId);
+    if (existing != null) {
+      throw StateError('A break has been running since ${existing.startedAt}.');
+    }
+    final taken = ShiftBreak(
+      id: _uuid.v4(),
+      shiftId: shiftId,
+      startedAt: DateTime.now(),
+      kind: kind,
+    );
+    await _db.insert('breaks', taken.toMap());
+    return taken;
+  }
+
+  @override
+  Future<ShiftBreak> endBreak(String breakId) async {
+    final rows = await _db.transaction((txn) async {
+      final closed = await txn.update(
+        'breaks',
+        {'ended_at': DateTime.now().toUtc().millisecondsSinceEpoch},
+        where: 'id = ? AND ended_at IS NULL',
+        whereArgs: [breakId],
+      );
+      final found = await txn.query(
+        'breaks',
+        where: 'id = ?',
+        whereArgs: [breakId],
+        limit: 1,
+      );
+      if (found.isEmpty) throw StateError('Break $breakId no longer exists.');
+      if (closed == 0) throw StateError('Break $breakId already ended.');
+      return found;
+    });
+    return ShiftBreak.fromMap(rows.first);
+  }
+
+  @override
+  Future<List<ShiftBreak>> breaksForShift(String shiftId) async {
+    final rows = await _db.query(
+      'breaks',
+      where: 'shift_id = ?',
+      whereArgs: [shiftId],
+      orderBy: 'started_at ASC',
+    );
+    return rows.map(ShiftBreak.fromMap).toList();
+  }
+
+  @override
+  Future<Map<String, List<ShiftBreak>>> breaksForShifts(
+    List<String> shiftIds,
+  ) async {
+    if (shiftIds.isEmpty) return const {};
+    final placeholders = List.filled(shiftIds.length, '?').join(', ');
+    final rows = await _db.query(
+      'breaks',
+      where: 'shift_id IN ($placeholders)',
+      whereArgs: shiftIds,
+      orderBy: 'started_at ASC',
+    );
+
+    final grouped = <String, List<ShiftBreak>>{};
+    for (final row in rows) {
+      final taken = ShiftBreak.fromMap(row);
+      grouped.putIfAbsent(taken.shiftId, () => []).add(taken);
+    }
+    return grouped;
+  }
+
+  @override
   Future<void> deleteEverything() async {
+    final attachments = await _db.query(
+      'deliveries',
+      columns: ['proof_photo_path', 'signature_path'],
+    );
+
     await _db.transaction((txn) async {
       // Explicit rather than relying on cascade, so this still empties the
       // tables if a row was ever orphaned.
       await txn.delete('trip_points');
       await txn.delete('trips');
       await txn.delete('deliveries');
+      await txn.delete('breaks');
       await txn.delete('shifts');
     });
+
+    await _deleteFiles([
+      for (final row in attachments) ...[
+        row['proof_photo_path'] as String?,
+        row['signature_path'] as String?,
+      ],
+    ]);
   }
 
   @override

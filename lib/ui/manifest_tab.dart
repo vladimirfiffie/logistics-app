@@ -5,24 +5,18 @@ import 'package:provider/provider.dart';
 
 import '../data/delivery_repository.dart';
 import '../data/seed_data.dart';
+import '../models/app_settings.dart';
 import '../models/delivery.dart';
 import '../services/app_haptics.dart';
 import '../services/location_service.dart';
+import '../services/route_planner.dart';
 import '../state/delivery_controller.dart';
+import '../state/settings_controller.dart';
 import 'delivery_detail_sheet.dart';
+import 'formatters.dart';
 import 'widgets/app_sheet.dart';
 import 'widgets/delivery_card.dart';
-
-enum _SortMode {
-  time('Time', Icons.schedule),
-  distance('Distance', Icons.near_me_outlined),
-  name('A–Z', Icons.sort_by_alpha);
-
-  const _SortMode(this.label, this.icon);
-
-  final String label;
-  final IconData icon;
-}
+import 'widgets/page_header.dart';
 
 /// The driver's run for the day: every stop still to be done.
 class ManifestTab extends StatefulWidget {
@@ -38,12 +32,37 @@ class ManifestTab extends StatefulWidget {
 
 class _ManifestTabState extends State<ManifestTab> {
   Position? _fix;
-  _SortMode _sort = _SortMode.time;
+
+  /// Null until the first build reads the driver's default. Held here rather
+  /// than in settings so changing it for one round is not a permanent change.
+  StopSort? _sort;
+  final _searchController = TextEditingController();
+  String _query = '';
 
   @override
   void initState() {
     super.initState();
     _refreshFix();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  /// Matches reference, customer or address. Six stops need no search; fifty
+  /// do, and the stop generator exists precisely to get to fifty.
+  List<Delivery> _filtered(List<Delivery> stops) {
+    final query = _query.trim().toLowerCase();
+    if (query.isEmpty) return stops;
+    return [
+      for (final stop in stops)
+        if (stop.reference.toLowerCase().contains(query) ||
+            stop.customerName.toLowerCase().contains(query) ||
+            stop.address.toLowerCase().contains(query))
+          stop,
+    ];
   }
 
   /// Distances on the cards are a convenience, not the tracking feature — so
@@ -72,16 +91,40 @@ class _ManifestTabState extends State<ManifestTab> {
     );
   }
 
+  StopSort _sortMode(BuildContext context) =>
+      _sort ?? context.read<SettingsController>().settings.defaultSort;
+
   List<Delivery> _sorted(List<Delivery> stops) {
+    final fix = _fix;
+    final sort = _sortMode(context);
     final list = [...stops];
-    switch (_sort) {
-      // Falls back to time when there is no fix to measure from, which is
-      // also why the chip is disabled in that state.
-      case _SortMode.distance when _fix != null:
-        list.sort(
-          (a, b) => (_distanceTo(a) ?? 0).compareTo(_distanceTo(b) ?? 0),
+
+    // Resolved once here rather than per comparison: `_distanceTo` reaches
+    // through a provider, and a sort calls its comparator O(n log n) times.
+    final location = context.read<LocationService>();
+
+    switch (sort) {
+      // Both distance modes fall back to time when there is no fix to measure
+      // from, which is also why their chips are disabled in that state.
+      case StopSort.distance when fix != null:
+        final byId = {
+          for (final stop in list)
+            stop.id: location.distanceBetween(
+              fix.latitude,
+              fix.longitude,
+              stop.latitude,
+              stop.longitude,
+            ),
+        };
+        list.sort((a, b) => byId[a.id]!.compareTo(byId[b.id]!));
+      case StopSort.route when fix != null:
+        return planRoute(
+          list,
+          fromLatitude: fix.latitude,
+          fromLongitude: fix.longitude,
+          distanceBetween: location.distanceBetween,
         );
-      case _SortMode.name:
+      case StopSort.name:
         list.sort(
           (a, b) => a.customerName.toLowerCase().compareTo(
             b.customerName.toLowerCase(),
@@ -91,6 +134,32 @@ class _ManifestTabState extends State<ManifestTab> {
         list.sort((a, b) => a.scheduledFor.compareTo(b.scheduledFor));
     }
     return list;
+  }
+
+  /// How much shorter the suggested route is than working down the time slots.
+  /// Shown so the driver can judge whether to bother, rather than being told
+  /// to trust it.
+  double? get _routeSaving {
+    final fix = _fix;
+    if (fix == null || _sortMode(context) != StopSort.route) return null;
+
+    final open = context.read<DeliveryController>().openStops;
+    final stops = _filtered(open);
+    if (stops.length < 3) return null;
+
+    final location = context.read<LocationService>();
+    final byTime = [...stops]
+      ..sort((a, b) => a.scheduledFor.compareTo(b.scheduledFor));
+
+    double measure(List<Delivery> order) => routeLength(
+      order,
+      fromLatitude: fix.latitude,
+      fromLongitude: fix.longitude,
+      distanceBetween: location.distanceBetween,
+    );
+
+    final saving = measure(byTime) - measure(_sorted(stops));
+    return saving <= 0 ? null : saving;
   }
 
   /// Generates extra work to test against.
@@ -161,7 +230,11 @@ class _ManifestTabState extends State<ManifestTab> {
   @override
   Widget build(BuildContext context) {
     final controller = context.watch<DeliveryController>();
-    final stops = _sorted(controller.openStops);
+    final open = controller.openStops;
+    final stops = _sorted(_filtered(open));
+    final sort = _sortMode(context);
+    final saving = _routeSaving;
+    final searching = _query.trim().isNotEmpty;
 
     return Scaffold(
       // The list is the whole page, so "add stops" belongs on a button over it
@@ -177,12 +250,35 @@ class _ManifestTabState extends State<ManifestTab> {
         },
         child: CustomScrollView(
           slivers: [
-            const SliverAppBar.large(title: Text("Today's run")),
+            const PageHeaderBar("Today's run"),
+
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: SearchBar(
+                  controller: _searchController,
+                  hintText: 'Search reference, customer or street',
+                  leading: const Icon(Icons.search),
+                  trailing: [
+                    if (searching)
+                      IconButton(
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() => _query = '');
+                        },
+                        icon: const Icon(Icons.clear),
+                        tooltip: 'Clear search',
+                      ),
+                  ],
+                  onChanged: (value) => setState(() => _query = value),
+                ),
+              ),
+            ),
 
             SliverToBoxAdapter(
               child: _SortChips(
-                selected: _sort,
-                distanceEnabled: _fix != null,
+                selected: sort,
+                fixEnabled: _fix != null,
                 onChanged: (mode) {
                   AppHaptics.select();
                   setState(() => _sort = mode);
@@ -190,14 +286,36 @@ class _ManifestTabState extends State<ManifestTab> {
               ),
             ),
 
-            SliverToBoxAdapter(
-              child: _RunSummary(
-                stopsRemaining: stops.length,
-                parcelsRemaining: controller.remainingParcels,
-                completed: controller.closedStops.length,
-                hasFix: _fix != null,
+            if (saving != null)
+              SliverToBoxAdapter(
+                child: _RouteSavingBanner(
+                  saving: saving,
+                  unit: context.distanceUnit,
+                ),
               ),
-            ),
+
+            if (!searching)
+              SliverToBoxAdapter(
+                child: _RunSummary(
+                  stopsRemaining: stops.length,
+                  parcelsRemaining: controller.remainingParcels,
+                  completed: controller.closedStops.length,
+                  hasFix: _fix != null,
+                ),
+              )
+            else
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Text(
+                    '${stops.length} of ${open.length} '
+                    '${open.length == 1 ? 'stop' : 'stops'} match "$_query"',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ),
 
             if (controller.isLoading && stops.isEmpty)
               const SliverFillRemaining(
@@ -211,6 +329,17 @@ class _ManifestTabState extends State<ManifestTab> {
                   icon: Icons.error_outline,
                   title: 'Could not load the manifest',
                   detail: '$error',
+                ),
+              )
+            else if (stops.isEmpty && searching)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: _Message(
+                  icon: Icons.search_off,
+                  title: 'No match',
+                  detail:
+                      'Nothing on the run matches "$_query". Closed stops are '
+                      'in History.',
                 ),
               )
             else if (stops.isEmpty)
@@ -247,19 +376,18 @@ class _ManifestTabState extends State<ManifestTab> {
   }
 }
 
-/// Sort control, moved out of the app bar. Three options is small enough to
-/// show all of them, which beats a menu that hides the current choice behind
-/// an icon.
+/// Sort control, moved out of the app bar. Few enough options to show all of
+/// them, which beats a menu that hides the current choice behind an icon.
 class _SortChips extends StatelessWidget {
   const _SortChips({
     required this.selected,
-    required this.distanceEnabled,
+    required this.fixEnabled,
     required this.onChanged,
   });
 
-  final _SortMode selected;
-  final bool distanceEnabled;
-  final ValueChanged<_SortMode> onChanged;
+  final StopSort selected;
+  final bool fixEnabled;
+  final ValueChanged<StopSort> onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -268,19 +396,65 @@ class _SortChips extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
       child: Row(
         children: [
-          for (final mode in _SortMode.values) ...[
+          for (final mode in StopSort.values) ...[
             ChoiceChip(
               label: Text(mode.label),
               avatar: Icon(mode.icon, size: 17),
               selected: selected == mode,
-              // Sorting by distance needs a fix to measure from.
-              onSelected: mode == _SortMode.distance && !distanceEnabled
+              // Distance and route both measure from the driver.
+              onSelected: mode.needsFix && !fixEnabled
                   ? null
                   : (_) => onChanged(mode),
             ),
             const SizedBox(width: 8),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// Says what the suggested order buys, in the driver's own units. Without a
+/// number, "best route" is just a claim.
+class _RouteSavingBanner extends StatelessWidget {
+  const _RouteSavingBanner({required this.saving, required this.unit});
+
+  final double saving;
+  final DistanceUnit unit;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Card(
+        elevation: 0,
+        color: scheme.tertiaryContainer,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              Icon(
+                Icons.alt_route,
+                size: 18,
+                color: scheme.onTertiaryContainer,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'About ${formatDistance(saving, unit: unit)} shorter than '
+                  'working down the time slots. Straight-line estimate — your '
+                  'slots and the roads still win.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onTertiaryContainer,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

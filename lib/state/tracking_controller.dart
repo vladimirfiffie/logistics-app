@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
@@ -48,7 +49,12 @@ class TrackingController extends ChangeNotifier {
 
   Trip? _trip;
   Delivery? _delivery;
-  List<TripPoint> _points = const [];
+
+  /// Appended to in place. Copying the whole trail on every fix — which is
+  /// what `_points = [..._points, point]` did — is quadratic: a ten-hour round
+  /// at a fix every five seconds copied about 26 million elements over the
+  /// day, and got slower the longer the driver worked.
+  List<TripPoint> _points = [];
   double _distanceMeters = 0;
   Position? _lastPosition;
   StreamSubscription<Position>? _subscription;
@@ -58,7 +64,10 @@ class TrackingController extends ChangeNotifier {
 
   Trip? get trip => _trip;
   Delivery? get delivery => _delivery;
-  List<TripPoint> get points => _points;
+
+  /// Read-only: the trail is appended to in place, so handing out the live
+  /// list would let a caller corrupt the odometer's source data.
+  List<TripPoint> get points => UnmodifiableListView(_points);
   double get distanceMeters => _distanceMeters;
   Position? get lastPosition => _lastPosition;
   LocationReadiness get readiness => _readiness;
@@ -104,12 +113,18 @@ class TrackingController extends ChangeNotifier {
         ? open.distanceMeters
         : _measureTrail(_points);
     _lastPosition = null;
+
+    // A resumed trip may already have announced arrival before the UI was
+    // killed. The flag lives in memory, so it comes back false and the driver
+    // gets told a second time about a stop they reached ten minutes ago —
+    // unless the trail says they are already inside the radius.
+    _announcedArrival = _trailReachedDestination();
     notifyListeners();
 
     final readiness = await _location.ensureReady();
     _readiness = readiness;
     if (readiness == LocationReadiness.ready) {
-      _listen();
+      await _listen();
     }
     notifyListeners();
   }
@@ -129,12 +144,12 @@ class TrackingController extends ChangeNotifier {
 
       _trip = await _repository.startTrip(delivery.id);
       _delivery = delivery;
-      _points = const [];
+      _points = [];
       _distanceMeters = 0;
       _lastPosition = null;
       _announcedArrival = false;
       await _notifications.cancelArrival();
-      _listen();
+      await _listen();
       await onManifestChanged?.call();
       return true;
     } catch (error) {
@@ -187,7 +202,7 @@ class TrackingController extends ChangeNotifier {
     if (isTracking) return;
     _trip = null;
     _delivery = null;
-    _points = const [];
+    _points = [];
     _distanceMeters = 0;
     _lastPosition = null;
     notifyListeners();
@@ -205,8 +220,29 @@ class TrackingController extends ChangeNotifier {
     }
   }
 
-  void _listen() {
-    _subscription?.cancel();
+  /// Whether any breadcrumb already recorded came inside the arrival radius.
+  /// Used on [restore] to decide whether the alert has effectively been given.
+  bool _trailReachedDestination() {
+    final stop = _delivery;
+    if (stop == null || _points.isEmpty) return false;
+    final radius = _settings().arrivalRadiusMeters;
+    for (final point in _points) {
+      final distance = _location.distanceBetween(
+        point.latitude,
+        point.longitude,
+        stop.latitude,
+        stop.longitude,
+      );
+      if (distance <= radius) return true;
+    }
+    return false;
+  }
+
+  /// Awaits the cancel before attaching the next stream: on Android each
+  /// position stream owns a foreground service, and starting a second one
+  /// before the first has released leaves an orphaned service behind.
+  Future<void> _listen() async {
+    await _subscription?.cancel();
     final label = _delivery?.customerName ?? 'Delivery in progress';
     _subscription = _location
         .trackPosition(
@@ -240,7 +276,7 @@ class TrackingController extends ChangeNotifier {
       );
     }
 
-    _points = [..._points, point];
+    _points.add(point);
     _lastPosition = position;
     notifyListeners();
 

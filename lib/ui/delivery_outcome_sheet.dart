@@ -5,6 +5,7 @@ import '../models/app_settings.dart';
 import '../models/delivery.dart';
 import '../models/trip.dart';
 import 'formatters.dart';
+import 'widgets/outcome_mark.dart';
 import 'widgets/app_sheet.dart';
 
 /// The moment a stop is closed out, either way.
@@ -37,7 +38,9 @@ class DeliveryOutcomeSheet extends StatelessWidget {
 
   bool get _failed => failureReason != null;
 
-  static Future<void> show(
+  /// Resolves to true when the driver asked to start the next stop straight
+  /// away, false or null otherwise.
+  static Future<bool?> show(
     BuildContext context, {
     required Delivery delivery,
     required Trip? trip,
@@ -46,7 +49,7 @@ class DeliveryOutcomeSheet extends StatelessWidget {
     Delivery? nextStop,
     String? failureReason,
   }) {
-    return showAppSheet<void>(
+    return showAppSheet<bool>(
       context,
       maxHeightFactor: 0.75,
       builder: (_) => DeliveryOutcomeSheet(
@@ -71,45 +74,19 @@ class DeliveryOutcomeSheet extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Center(
-            child:
-                Container(
-                      width: 88,
-                      height: 88,
-                      decoration: BoxDecoration(
-                        color: _failed
-                            ? scheme.errorContainer
-                            : scheme.tertiaryContainer,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        _failed
-                            ? Icons.report_gmailerrorred_rounded
-                            : Icons.check_rounded,
-                        size: 52,
-                        color: _failed
-                            ? scheme.onErrorContainer
-                            : scheme.onTertiaryContainer,
-                      ),
-                    )
-                    .animate()
-                    // A success overshoots and settles; a failure just fades
-                    // up. Bouncing at someone whose delivery went wrong reads
-                    // as gloating.
-                    .scale(
-                      duration: _failed ? 220.ms : 420.ms,
-                      curve: _failed ? Curves.easeOut : Curves.elasticOut,
-                      begin: Offset(_failed ? 0.9 : 0.4, _failed ? 0.9 : 0.4),
-                      end: const Offset(1, 1),
-                    )
-                    .fadeIn(duration: 180.ms),
-          ),
+          // The mark draws its own stroke, so it is not wrapped in the
+          // fade/scale the rest of the sheet uses.
+          Center(child: OutcomeMark(failed: _failed)),
           const SizedBox(height: 18),
           Text(
             _failed ? 'Not delivered' : 'Delivered',
             textAlign: TextAlign.center,
             style: theme.textTheme.headlineSmall?.copyWith(
               fontWeight: FontWeight.w700,
+              color: OutcomeMark.colorFor(
+                failed: _failed,
+                brightness: theme.brightness,
+              ),
             ),
           ).animate().fadeIn(delay: 160.ms, duration: 240.ms).moveY(begin: 8),
           const SizedBox(height: 4),
@@ -224,13 +201,27 @@ class DeliveryOutcomeSheet extends StatelessWidget {
           ],
 
           const SizedBox(height: 22),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(),
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(50),
-            ),
-            child: const Text('Carry on'),
-          ).animate().fadeIn(delay: 460.ms, duration: 220.ms),
+          if (nextStop != null) ...[
+            FilledButton.icon(
+              onPressed: () => Navigator.of(context).pop(true),
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('Start the next stop'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+              ),
+            ).animate().fadeIn(delay: 440.ms, duration: 220.ms),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Not yet'),
+            ).animate().fadeIn(delay: 480.ms, duration: 220.ms),
+          ] else
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+              ),
+              child: const Text('Carry on'),
+            ).animate().fadeIn(delay: 460.ms, duration: 220.ms),
         ],
       ),
     );

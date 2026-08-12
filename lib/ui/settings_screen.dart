@@ -1,6 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../data/delivery_repository.dart';
 import '../data/seed_data.dart';
@@ -9,15 +13,18 @@ import '../models/van_tag.dart';
 import '../release_notes.dart';
 import '../services/app_haptics.dart';
 import '../services/app_preferences.dart';
+import '../services/export_service.dart';
 import '../services/location_service.dart';
 import '../services/nfc_service.dart';
 import '../services/notification_service.dart';
 import '../state/delivery_controller.dart';
 import '../state/settings_controller.dart';
+import '../state/shift_controller.dart';
 import '../state/tracking_controller.dart';
 import 'formatters.dart';
 import 'nfc_scan_sheet.dart';
 import 'onboarding_screen.dart';
+import 'timesheet_screen.dart';
 import 'whats_new_sheet.dart';
 import 'widgets/app_sheet.dart';
 
@@ -39,6 +46,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   LocationReadiness? _readiness;
   bool _backgroundGranted = false;
+  bool _exporting = false;
 
   @override
   void initState() {
@@ -74,6 +82,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.only(bottom: 32),
         children: [
+          // ── Appearance ──────────────────────────────────────────────────
           const _SectionHeader('Appearance'),
           _ChoiceTile<ThemeChoice>(
             icon: settings.theme.icon,
@@ -105,9 +114,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               controller.setAmoled(value);
             },
           ),
+
+          // ── Units and formats ───────────────────────────────────────────
+          // Grouped rather than scattered: someone who reads miles usually
+          // wants to fix every readout in one visit.
+          const _SectionHeader('Units & formats'),
+          const _SubsectionHeader('Distance'),
           _ChoiceTile<DistanceUnit>(
             icon: Icons.straighten,
-            title: 'Units',
+            title: 'Distance and speed',
             value: settings.distanceUnit,
             valueLabel: settings.distanceUnit.label,
             options: DistanceUnit.values,
@@ -115,6 +130,50 @@ class _SettingsScreenState extends State<SettingsScreen> {
             detailOf: (unit) => unit.detail,
             onChanged: controller.setDistanceUnit,
           ),
+
+          const _SubsectionHeader('Weather'),
+          _ChoiceTile<TemperatureUnit>(
+            icon: Icons.thermostat_outlined,
+            title: 'Temperature',
+            value: settings.temperatureUnit,
+            valueLabel: settings.temperatureUnit == TemperatureUnit.matchUnits
+                ? '${settings.temperatureUnit.label} · '
+                      '${settings.usesFahrenheit ? '°F' : '°C'}'
+                : settings.temperatureUnit.label,
+            options: TemperatureUnit.values,
+            labelOf: (unit) => unit.label,
+            detailOf: (unit) => unit.detail,
+            onChanged: controller.setTemperatureUnit,
+          ),
+          _ChoiceTile<WindUnit>(
+            icon: Icons.air,
+            title: 'Wind speed',
+            value: settings.windUnit,
+            valueLabel: settings.windUnit == WindUnit.matchUnits
+                ? '${settings.windUnit.label} · '
+                      '${settings.resolvedWindUnit.detail}'
+                : settings.windUnit.label,
+            options: WindUnit.values,
+            labelOf: (unit) => unit.label,
+            detailOf: (unit) => unit.detail,
+            onChanged: controller.setWindUnit,
+          ),
+          _ChoiceTile<PrecipitationUnit>(
+            icon: Icons.water_drop_outlined,
+            title: 'Rain and snow',
+            value: settings.precipitationUnit,
+            valueLabel:
+                settings.precipitationUnit == PrecipitationUnit.matchUnits
+                ? '${settings.precipitationUnit.label} · '
+                      '${settings.resolvedPrecipitationUnit.detail}'
+                : settings.precipitationUnit.label,
+            options: PrecipitationUnit.values,
+            labelOf: (unit) => unit.label,
+            detailOf: (unit) => unit.detail,
+            onChanged: controller.setPrecipitationUnit,
+          ),
+
+          const _SubsectionHeader('Date and time'),
           _ChoiceTile<DateStyle>(
             icon: Icons.calendar_today_outlined,
             title: 'Date format',
@@ -139,6 +198,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: controller.setClockStyle,
           ),
 
+          // ── Driver ──────────────────────────────────────────────────────
           const _SectionHeader('Driver'),
           _TextTile(
             icon: Icons.badge_outlined,
@@ -155,13 +215,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: controller.setVehicleLabel,
           ),
 
-          const _SectionHeader('Van tag (NFC)'),
+          // ── Shift ───────────────────────────────────────────────────────
+          const _SectionHeader('Shift'),
+          const TimesheetTile(),
+          SwitchListTile(
+            secondary: const Icon(Icons.notifications_none),
+            title: const Text('Show a notification while on shift'),
+            subtitle: const Text(
+              'A silent, ongoing reminder that you are still clocked on.',
+            ),
+            value: settings.onShiftNotification,
+            onChanged: (value) => _setOnShiftNotification(controller, value),
+          ),
+          _ChoiceTile<int>(
+            icon: Icons.free_breakfast_outlined,
+            title: 'Break reminder',
+            value: settings.breakReminderMinutes,
+            valueLabel: settings.breakReminderMinutes == 0
+                ? 'Off'
+                : 'After ${_hours(settings.breakReminderMinutes)}',
+            options: const [0, 120, 180, 240, 300, 360],
+            labelOf: (minutes) =>
+                minutes == 0 ? 'Off' : 'After ${_hours(minutes)}',
+            detailOf: (minutes) => minutes == 0
+                ? 'Never remind me.'
+                : 'Once per stretch, not once a day.',
+            onChanged: controller.setBreakReminderMinutes,
+          ),
+
+          const _SubsectionHeader('Van tag (NFC)'),
           _NfcSection(
             vehicleLabel: settings.vehicleLabel,
             clockOnWithTag: settings.nfcClockOn,
             onClockOnWithTagChanged: controller.setNfcClockOn,
           ),
 
+          // ── Manifest ────────────────────────────────────────────────────
+          const _SectionHeader('Manifest'),
+          _ChoiceTile<StopSort>(
+            icon: settings.defaultSort.icon,
+            title: 'Default order',
+            value: settings.defaultSort,
+            valueLabel: settings.defaultSort.label,
+            options: StopSort.values,
+            labelOf: (sort) => sort.label,
+            detailOf: (sort) => sort.detail,
+            onChanged: controller.setDefaultSort,
+          ),
+
+          // ── Tracking ────────────────────────────────────────────────────
           const _SectionHeader('Tracking'),
           _ChoiceTile<TrackingAccuracy>(
             icon: Icons.gps_fixed,
@@ -180,6 +282,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
             disabledNote: 'Finish the current trip to change this.',
           ),
           SwitchListTile(
+            secondary: const Icon(Icons.play_circle_outline),
+            title: const Text('Start the next stop automatically'),
+            subtitle: const Text(
+              'Closing out a stop begins recording the next one without '
+              'asking.',
+            ),
+            isThreeLine: true,
+            value: settings.autoTrackNextStop,
+            onChanged: (value) {
+              AppHaptics.select();
+              controller.setAutoTrackNextStop(value);
+            },
+          ),
+          SwitchListTile(
             secondary: const Icon(Icons.screen_lock_portrait_outlined),
             title: const Text('Keep screen on while tracking'),
             subtitle: const Text('Handy on a windscreen mount. Costs battery.'),
@@ -189,6 +305,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
               controller.setKeepScreenOn(value);
             },
           ),
+          _ChoiceTile<MapFollowMode>(
+            icon: Icons.map_outlined,
+            title: 'Map behaviour',
+            value: settings.followMode,
+            valueLabel: settings.followMode.label,
+            options: MapFollowMode.values,
+            labelOf: (mode) => mode.label,
+            detailOf: (mode) => mode.detail,
+            onChanged: controller.setFollowMode,
+          ),
+
+          // ── Proof of delivery ───────────────────────────────────────────
+          const _SectionHeader('Proof of delivery'),
           SwitchListTile(
             secondary: const Icon(Icons.swipe_right_outlined),
             title: const Text('Slide to complete a delivery'),
@@ -201,17 +330,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               controller.setConfirmWithSlide(value);
             },
           ),
-
-          _ChoiceTile<MapFollowMode>(
-            icon: Icons.map_outlined,
-            title: 'Map behaviour',
-            value: settings.followMode,
-            valueLabel: settings.followMode.label,
-            options: MapFollowMode.values,
-            labelOf: (mode) => mode.label,
-            detailOf: (mode) => mode.detail,
-            onChanged: controller.setFollowMode,
-          ),
           SwitchListTile(
             secondary: const Icon(Icons.photo_camera_outlined),
             title: const Text('Require a proof photo'),
@@ -222,7 +340,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
               controller.setRequireProofPhoto(value);
             },
           ),
+          _ChoiceTile<SignatureMode>(
+            icon: Icons.draw_outlined,
+            title: 'Signature',
+            value: settings.signatureMode,
+            valueLabel: settings.signatureMode.label,
+            options: SignatureMode.values,
+            labelOf: (mode) => mode.label,
+            detailOf: (mode) => mode.detail,
+            onChanged: controller.setSignatureMode,
+          ),
 
+          // ── Notifications ───────────────────────────────────────────────
           const _SectionHeader('Notifications'),
           SwitchListTile(
             secondary: const Icon(Icons.notifications_active_outlined),
@@ -232,11 +361,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               '${settings.arrivalRadiusMeters}m of a stop.',
             ),
             value: settings.arrivalAlerts,
-            onChanged: (value) async {
-              AppHaptics.select();
-              await controller.setArrivalAlerts(value);
-              if (value) await NotificationService().requestPermission();
-            },
+            onChanged: (value) => _setArrivalAlerts(controller, value),
           ),
           if (settings.arrivalAlerts)
             _ChoiceTile<int>(
@@ -256,6 +381,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onChanged: controller.setArrivalRadius,
             ),
 
+          // ── Feedback ────────────────────────────────────────────────────
           const _SectionHeader('Feedback'),
           SwitchListTile(
             secondary: const Icon(Icons.vibration),
@@ -269,7 +395,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               if (value) await AppHaptics.delivered();
             },
           ),
-
           SwitchListTile(
             secondary: const Icon(Icons.celebration_outlined),
             title: const Text('Celebrate deliveries'),
@@ -281,6 +406,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             },
           ),
 
+          // ── Weather ─────────────────────────────────────────────────────
           const _SectionHeader('Weather'),
           SwitchListTile(
             secondary: const Icon(Icons.wb_cloudy_outlined),
@@ -297,20 +423,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             },
           ),
           if (settings.showWeather)
-            _ChoiceTile<TemperatureUnit>(
-              icon: Icons.thermostat_outlined,
-              title: 'Temperature',
-              value: settings.temperatureUnit,
-              valueLabel: settings.temperatureUnit == TemperatureUnit.matchUnits
-                  ? '${settings.temperatureUnit.label} · '
-                        '${settings.usesFahrenheit ? '°F' : '°C'}'
-                  : settings.temperatureUnit.label,
-              options: TemperatureUnit.values,
-              labelOf: (unit) => unit.label,
-              detailOf: (unit) => unit.detail,
-              onChanged: controller.setTemperatureUnit,
+            const ListTile(
+              leading: Icon(Icons.straighten),
+              title: Text('Weather units'),
+              subtitle: Text(
+                'Temperature, wind and rain are under Units & formats above.',
+              ),
+              enabled: false,
             ),
 
+          // ── Permissions ─────────────────────────────────────────────────
           const _SectionHeader('Permissions'),
           _PermissionTile(
             readiness: _readiness,
@@ -318,13 +440,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onRefresh: _refreshPermissions,
           ),
 
+          // ── Data ────────────────────────────────────────────────────────
           const _SectionHeader('Data'),
+          const _SubsectionHeader('Export'),
+          ListTile(
+            leading: const Icon(Icons.table_view_outlined),
+            title: const Text('Export stops as CSV'),
+            subtitle: const Text(
+              'One row per stop with the distance recorded getting to it. '
+              'Opens in any spreadsheet.',
+            ),
+            isThreeLine: true,
+            trailing: _exporting
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.chevron_right),
+            onTap: _exporting ? null : _exportCsv,
+          ),
+          ListTile(
+            leading: const Icon(Icons.timeline_outlined),
+            title: const Text('Export routes as GPX'),
+            subtitle: const Text(
+              'Your recorded trails, one track per trip. Reads in any mapping '
+              'tool.',
+            ),
+            isThreeLine: true,
+            trailing: _exporting
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.chevron_right),
+            onTap: _exporting ? null : _exportGpx,
+          ),
+
+          const _SubsectionHeader('Delete'),
           ListTile(
             leading: const Icon(Icons.cleaning_services_outlined),
             title: const Text('Clear history'),
             subtitle: const Text(
-              'Removes closed stops and their recorded routes. Open stops '
-              'are kept.',
+              'Removes closed stops, their recorded routes and their photos. '
+              'Open stops are kept.',
             ),
             isThreeLine: true,
             onTap: _clearHistory,
@@ -339,6 +499,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             enabled: !isTracking,
           ),
 
+          // ── About ───────────────────────────────────────────────────────
           const _SectionHeader('About'),
           ListTile(
             leading: const Icon(Icons.info_outline),
@@ -380,6 +541,130 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: () => _confirmReset(controller),
           ),
         ],
+      ),
+    );
+  }
+
+  static String _hours(int minutes) {
+    if (minutes % 60 == 0) return '${minutes ~/ 60}h';
+    return '${minutes ~/ 60}h ${minutes % 60}m';
+  }
+
+  /// The on-shift notification needs the same grant arrival alerts do, and
+  /// posts immediately rather than waiting for the next clock-on.
+  Future<void> _setOnShiftNotification(
+    SettingsController controller,
+    bool value,
+  ) async {
+    AppHaptics.select();
+    final shifts = context.read<ShiftController>();
+    final messenger = ScaffoldMessenger.of(context);
+
+    if (!value) {
+      await controller.setOnShiftNotification(false);
+      await shifts.refreshNotification();
+      return;
+    }
+
+    final notifications = NotificationService();
+    final granted =
+        await notifications.hasPermission() ||
+        await notifications.requestPermission();
+
+    await controller.setOnShiftNotification(granted);
+    await shifts.refreshNotification();
+    if (granted) return;
+
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Notifications are blocked for this app.')),
+    );
+  }
+
+  Future<void> _exportCsv() => _export(
+    (service) => service.exportStopsCsv(),
+    describe: 'Stops exported',
+  );
+
+  Future<void> _exportGpx() => _export(
+    (service) => service.exportTrailsGpx(),
+    describe: 'Routes exported',
+  );
+
+  /// Writes the file and tells the driver where it went.
+  ///
+  /// The path is the whole point — an export nobody can find is not an export
+  /// — so it is shown in full rather than as "done".
+  Future<void> _export(
+    Future<File> Function(ExportService) run, {
+    required String describe,
+  }) async {
+    final service = ExportService(context.read<DeliveryRepository>());
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _exporting = true);
+
+    try {
+      final file = await run(service);
+      if (!mounted) return;
+      await AppHaptics.delivered();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('$describe to ${p.basename(file.path)}'),
+          action: SnackBarAction(
+            label: 'Share',
+            onPressed: () => SharePlus.instance.share(
+              ShareParams(
+                files: [XFile(file.path)],
+                text: 'Delivery export from Logistics',
+              ),
+            ),
+          ),
+          duration: const Duration(seconds: 8),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      await AppHaptics.error();
+      messenger.showSnackBar(
+        SnackBar(content: Text('Could not export: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
+  /// Turning arrival alerts on is meaningless without the notification
+  /// permission, and Android 13+ can refuse it. Asking and then ignoring the
+  /// answer left the switch reading "on" while no alert could ever arrive, so
+  /// a refusal puts the switch back and says why.
+  Future<void> _setArrivalAlerts(
+    SettingsController controller,
+    bool value,
+  ) async {
+    AppHaptics.select();
+    final messenger = ScaffoldMessenger.of(context);
+
+    if (!value) {
+      await controller.setArrivalAlerts(false);
+      return;
+    }
+
+    final notifications = NotificationService();
+    final granted =
+        await notifications.hasPermission() ||
+        await notifications.requestPermission();
+
+    await controller.setArrivalAlerts(granted);
+    if (granted) return;
+
+    messenger.showSnackBar(
+      SnackBar(
+        content: const Text(
+          'Notifications are blocked, so arrival alerts cannot be delivered.',
+        ),
+        action: SnackBarAction(
+          label: 'Settings',
+          onPressed: () => context.read<LocationService>().openSettings(),
+        ),
       ),
     );
   }
@@ -823,6 +1108,29 @@ class _NfcSectionState extends State<_NfcSection> {
           enabled: usable && !_writing,
         ),
       ],
+    );
+  }
+}
+
+/// A group inside a section, for the places where one heading would otherwise
+/// carry a dozen unrelated rows.
+class _SubsectionHeader extends StatelessWidget {
+  const _SubsectionHeader(this.title);
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 2),
+      child: Text(
+        title,
+        style: theme.textTheme.labelMedium?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 }

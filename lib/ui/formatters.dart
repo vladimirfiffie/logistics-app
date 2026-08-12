@@ -88,14 +88,33 @@ String formatTemperature(double celsius, {bool fahrenheit = false}) {
   return '${celsius.round()}°C';
 }
 
-/// Wind arrives from the forecast in km/h and follows the distance unit —
-/// nobody reads their distances in miles and their wind in kilometres.
-String formatWindSpeed(double kph, {DistanceUnit unit = DistanceUnit.metric}) {
+/// Wind arrives from the forecast in km/h. Pass the unit already resolved by
+/// [AppSettings.resolvedWindUnit] — "match my units" is not this function's
+/// business.
+String formatWindSpeed(double kph, {WindUnit unit = WindUnit.kmh}) {
   if (kph.isNaN || kph.isInfinite) return '—';
-  if (unit == DistanceUnit.imperial) {
-    return '${(kph * 1000 / _metresPerMile).round()} mph';
-  }
-  return '${kph.round()} km/h';
+  return switch (unit) {
+    WindUnit.mph => '${(kph * 1000 / _metresPerMile).round()} mph',
+    WindUnit.metresPerSecond => '${(kph / 3.6).toStringAsFixed(1)} m/s',
+    WindUnit.knots => '${(kph / 1.852).round()} kn',
+    // matchUnits should have been resolved before it got here; treating it as
+    // km/h is the sane fallback rather than an assertion in a weather card.
+    WindUnit.kmh || WindUnit.matchUnits => '${kph.round()} km/h',
+  };
+}
+
+/// Rain or snow in the last hour. Two decimals in inches, because 1mm is only
+/// 0.04in and one decimal would round most drizzle to zero.
+String formatPrecipitation(
+  double millimetres, {
+  PrecipitationUnit unit = PrecipitationUnit.millimetres,
+}) {
+  if (millimetres.isNaN || millimetres.isInfinite) return '—';
+  return switch (unit) {
+    PrecipitationUnit.inches => '${(millimetres / 25.4).toStringAsFixed(2)} in',
+    PrecipitationUnit.millimetres ||
+    PrecipitationUnit.matchUnits => '${millimetres.toStringAsFixed(1)} mm',
+  };
 }
 
 String formatTime(DateTime time) =>

@@ -235,10 +235,44 @@ void main() {
       expect(formatTemperature(double.nan), '—');
     });
 
-    test('wind follows the distance unit', () {
+    test('wind renders in every unit it offers', () {
       expect(formatWindSpeed(48), '48 km/h');
-      // 48 km/h is just under 30 mph.
-      expect(formatWindSpeed(48, unit: DistanceUnit.imperial), '30 mph');
+      // 48 km/h is just under 30 mph, 13.3 m/s and 26 knots.
+      expect(formatWindSpeed(48, unit: WindUnit.mph), '30 mph');
+      expect(formatWindSpeed(48, unit: WindUnit.metresPerSecond), '13.3 m/s');
+      expect(formatWindSpeed(48, unit: WindUnit.knots), '26 kn');
+    });
+
+    test('unresolved "match my units" falls back rather than throwing', () {
+      expect(formatWindSpeed(48, unit: WindUnit.matchUnits), '48 km/h');
+      expect(
+        formatPrecipitation(2, unit: PrecipitationUnit.matchUnits),
+        '2.0 mm',
+      );
+    });
+
+    test('precipitation keeps two decimals in inches', () {
+      expect(formatPrecipitation(2.5), '2.5 mm');
+      // 2.5mm is a tenth of an inch — one decimal would read "0.1 in".
+      expect(
+        formatPrecipitation(2.5, unit: PrecipitationUnit.inches),
+        '0.10 in',
+      );
+    });
+
+    test('wind and rain resolve independently of distance', () {
+      const settings = AppSettings(
+        distanceUnit: DistanceUnit.imperial,
+        windUnit: WindUnit.knots,
+        precipitationUnit: PrecipitationUnit.millimetres,
+      );
+      expect(settings.resolvedWindUnit, WindUnit.knots);
+      expect(settings.resolvedPrecipitationUnit, PrecipitationUnit.millimetres);
+
+      // Left on "match", they follow the distance unit as before.
+      const matching = AppSettings(distanceUnit: DistanceUnit.imperial);
+      expect(matching.resolvedWindUnit, WindUnit.mph);
+      expect(matching.resolvedPrecipitationUnit, PrecipitationUnit.inches);
     });
 
     test('"match my units" resolves against the distance unit', () {

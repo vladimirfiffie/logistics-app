@@ -6,6 +6,7 @@ import '../data/delivery_repository.dart';
 import '../models/app_settings.dart';
 import '../models/delivery.dart';
 import '../models/shift.dart';
+import '../models/shift_break.dart';
 import '../models/trip.dart';
 import '../services/app_haptics.dart';
 import '../services/location_service.dart';
@@ -19,6 +20,7 @@ import 'nfc_scan_sheet.dart';
 import 'formatters.dart';
 import 'settings_screen.dart';
 import 'widgets/app_sheet.dart';
+import 'widgets/page_header.dart';
 import 'widgets/status_chip.dart';
 
 /// The at-a-glance screen: how the day is going, what is next, and one tap to
@@ -39,16 +41,42 @@ class HomeTab extends StatefulWidget {
   State<HomeTab> createState() => _HomeTabState();
 }
 
-class _HomeTabState extends State<HomeTab> {
+class _HomeTabState extends State<HomeTab> with WidgetsBindingObserver {
   List<Trip> _trips = const [];
   Weather? _weather;
   bool _loadingWeather = false;
 
+  /// When [_weather] was fetched. Conditions that matter to a driver — ice,
+  /// fog, a squall coming through — change over a round, and the card used to
+  /// be fetched once at launch and left to go stale for the rest of the day.
+  DateTime? _weatherFetchedAt;
+
+  static const _weatherFreshFor = Duration(minutes: 15);
+
+  bool get _weatherIsStale {
+    final at = _weatherFetchedAt;
+    return at == null || DateTime.now().difference(at) >= _weatherFreshFor;
+  }
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadTrips();
     _loadWeather();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Coming back to the app after a couple of stops is the moment a stale
+  /// card is most obvious, so that is when it is worth re-checking.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _weatherIsStale) _loadWeather();
   }
 
   Future<void> _toggleShift() async {
@@ -169,6 +197,65 @@ class _HomeTabState extends State<HomeTab> {
     _say('Clocked off · ${formatDuration(finished.duration)} on shift.');
   }
 
+  /// Breaks are one tap each way. The kind is only asked for when starting
+  /// one, and only because a timesheet reads better with "Lunch" on it than
+  /// with three identical rows.
+  Future<void> _toggleBreak() async {
+    final shifts = context.read<ShiftController>();
+    if (shifts.isBusy) return;
+
+    if (shifts.isOnBreak) {
+      final finished = await shifts.endBreak();
+      await AppHaptics.trackingStarted();
+      if (!mounted) return;
+      _say(
+        finished == null
+            ? 'Could not end the break.'
+            : 'Back on the clock · ${formatDuration(finished.duration)} break.',
+      );
+      return;
+    }
+
+    final kind = await showAppSheet<BreakKind>(
+      context,
+      builder: (sheetContext) => Padding(
+        padding: const EdgeInsets.fromLTRB(8, 0, 8, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: SheetHeader(
+                title: 'Take a break',
+                subtitle:
+                    'The shift clock keeps running; the break is subtracted '
+                    'from your worked hours.',
+                icon: Icons.free_breakfast_outlined,
+              ),
+            ),
+            for (final kind in BreakKind.values)
+              ListTile(
+                leading: const Icon(Icons.schedule),
+                title: Text(kind.detail),
+                onTap: () => Navigator.of(sheetContext).pop(kind),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (kind == null || !mounted) return;
+
+    final started = await shifts.startBreak(kind: kind);
+    await AppHaptics.trackingStopped();
+    if (!mounted) return;
+    _say(
+      started == null
+          ? 'Could not start a break.'
+          : '${kind.detail} started. The clock is paused.',
+    );
+  }
+
   void _say(String message) => ScaffoldMessenger.of(
     context,
   ).showSnackBar(SnackBar(content: Text(message)));
@@ -176,13 +263,17 @@ class _HomeTabState extends State<HomeTab> {
   /// Best-effort. Uses the cached fix rather than requesting a fresh one — a
   /// weather card is not worth waking the GPS for, and it must never prompt
   /// for permission on the home screen.
-  Future<void> _loadWeather() async {
-    if (!mounted) return;
+  Future<void> _loadWeather({bool force = false}) async {
+    if (!mounted || _loadingWeather) return;
     final settings = context.read<SettingsController>().settings;
     if (!settings.showWeather) {
-      setState(() => _weather = null);
+      setState(() {
+        _weather = null;
+        _weatherFetchedAt = null;
+      });
       return;
     }
+    if (!force && !_weatherIsStale) return;
 
     setState(() => _loadingWeather = true);
     try {
@@ -199,7 +290,14 @@ class _HomeTabState extends State<HomeTab> {
         latitude: fix.latitude,
         longitude: fix.longitude,
       );
-      if (mounted) setState(() => _weather = weather);
+      if (mounted && weather != null) {
+        setState(() {
+          _weather = weather;
+          // Stamped only on success, so a failed fetch is retried on the next
+          // resume rather than being treated as fifteen minutes of fresh data.
+          _weatherFetchedAt = DateTime.now();
+        });
+      }
     } catch (_) {
       // No fix, or no network. The card simply does not appear.
     } finally {
@@ -258,13 +356,25 @@ class _HomeTabState extends State<HomeTab> {
     final done = closed.length;
     final next = _nextStop(controller);
 
+    // Built once here rather than inside itemBuilder, which rebuilt the whole
+    // filtered list for every row it drew.
+    final upcoming = [
+      for (final stop in open)
+        if (stop.id != next?.id) stop,
+    ];
+
     return RefreshIndicator(
       onRefresh: () async {
-        await Future.wait([controller.refresh(), _loadTrips(), _loadWeather()]);
+        // An explicit pull always refetches, whatever the cache says.
+        await Future.wait([
+          controller.refresh(),
+          _loadTrips(),
+          _loadWeather(force: true),
+        ]);
       },
       child: CustomScrollView(
         slivers: [
-          const SliverAppBar.large(title: Text('Home')),
+          const PageHeaderBar('Home'),
 
           SliverToBoxAdapter(
             child: Padding(
@@ -274,17 +384,21 @@ class _HomeTabState extends State<HomeTab> {
                 children: [
                   Text(
                     _greeting(settings.driverName),
-                    style: theme.textTheme.headlineSmall?.copyWith(
+                    // Matches the page title above it: the greeting is the
+                    // other half of the header, not a caption under it.
+                    style: theme.textTheme.headlineMedium?.copyWith(
                       fontWeight: FontWeight.w700,
+                      height: 1.15,
                     ),
                   ),
+                  const SizedBox(height: 4),
                   Text(
                     [
                       formatDate(DateTime.now()),
                       if (settings.vehicleLabel.isNotEmpty)
                         settings.vehicleLabel,
                     ].join(' · '),
-                    style: theme.textTheme.bodyMedium?.copyWith(
+                    style: theme.textTheme.titleSmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
@@ -305,8 +419,7 @@ class _HomeTabState extends State<HomeTab> {
             SliverToBoxAdapter(
               child: _WeatherCard(
                 weather: _weather,
-                unit: unit,
-                fahrenheit: settings.usesFahrenheit,
+                settings: settings,
               ).animate().fadeIn(delay: 60.ms, duration: 320.ms),
             ),
 
@@ -315,8 +428,11 @@ class _HomeTabState extends State<HomeTab> {
           // it.
           SliverToBoxAdapter(
             child: Consumer<ShiftController>(
-              builder: (context, shifts, _) =>
-                  _ShiftCard(shifts: shifts, onToggle: _toggleShift),
+              builder: (context, shifts, _) => _ShiftCard(
+                shifts: shifts,
+                onToggle: _toggleShift,
+                onToggleBreak: _toggleBreak,
+              ),
             ).animate().fadeIn(delay: 40.ms, duration: 300.ms),
           ),
 
@@ -407,19 +523,18 @@ class _HomeTabState extends State<HomeTab> {
             )
           else
             SliverList.builder(
-              // Skips the stop already shown in the next-stop card above.
-              itemCount: open.length - 1,
+              itemCount: upcoming.length,
               itemBuilder: (context, index) {
-                final upcoming = open
-                    .where((stop) => stop.id != next?.id)
-                    .toList();
-                if (index >= upcoming.length) return null;
                 final stop = upcoming[index];
                 return ListTile(
                   leading: CircleAvatar(
                     backgroundColor: theme.colorScheme.surfaceContainerHighest,
                     child: Text(
-                      '${index + 2}',
+                      // Position in the day's run, not position in this list.
+                      // The next-stop card is whichever stop is in transit,
+                      // which is often not the first one — numbering from 2
+                      // here told the driver stop 1 was stop 2.
+                      '${open.indexOf(stop) + 1}',
                       style: theme.textTheme.labelMedium,
                     ),
                   ),
@@ -638,10 +753,15 @@ class _DriverTile extends StatelessWidget {
 /// last thing a driver does, and because "am I on the clock?" should never
 /// need looking for.
 class _ShiftCard extends StatelessWidget {
-  const _ShiftCard({required this.shifts, required this.onToggle});
+  const _ShiftCard({
+    required this.shifts,
+    required this.onToggle,
+    required this.onToggleBreak,
+  });
 
   final ShiftController shifts;
   final VoidCallback onToggle;
+  final VoidCallback onToggleBreak;
 
   @override
   Widget build(BuildContext context) {
@@ -649,67 +769,116 @@ class _ShiftCard extends StatelessWidget {
     final scheme = theme.colorScheme;
     final on = shifts.isOnShift;
     final shift = shifts.current;
+    final onBreak = shifts.isOnBreak;
+
+    // A break is a third state, and it has to be unmistakable: a driver
+    // glancing at this card needs to know whether the clock is running.
+    final surface = !on
+        ? scheme.surfaceContainerHighest
+        : onBreak
+        ? scheme.secondaryContainer
+        : scheme.tertiaryContainer;
+    final onSurface = !on
+        ? scheme.onSurfaceVariant
+        : onBreak
+        ? scheme.onSecondaryContainer
+        : scheme.onTertiaryContainer;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
       child: Card(
         elevation: 0,
-        color: on ? scheme.tertiaryContainer : scheme.surfaceContainerHighest,
+        color: surface,
         child: Padding(
           padding: const EdgeInsets.all(16),
-          child: Row(
+          child: Column(
             children: [
-              Icon(
-                on ? Icons.timer_outlined : Icons.play_circle_outline,
-                color: on
-                    ? scheme.onTertiaryContainer
-                    : scheme.onSurfaceVariant,
+              Row(
+                children: [
+                  Icon(
+                    !on
+                        ? Icons.play_circle_outline
+                        : onBreak
+                        ? Icons.free_breakfast_outlined
+                        : Icons.timer_outlined,
+                    color: onSurface,
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          !on
+                              ? 'Not on shift'
+                              : onBreak
+                              ? 'On a break'
+                              : 'On shift',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: on ? onSurface : null,
+                          ),
+                        ),
+                        Text(
+                          switch ((on, shift)) {
+                            (true, final Shift current) => [
+                              // Worked time, not wall-clock: a break should be
+                              // visible in the number, not only in the colour.
+                              formatDuration(shifts.workedElapsed),
+                              if (shifts.breakElapsed > Duration.zero)
+                                '${formatDuration(shifts.breakElapsed)} break',
+                              if (current.vehicleLabel case final String van)
+                                van,
+                              if (current.startedByTag) 'tag',
+                            ].join(' · '),
+                            _ => 'Tap your van tag, or start without one.',
+                          },
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: on ? onSurface : scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  shifts.isBusy
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : FilledButton(
+                          onPressed: onToggle,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: on ? scheme.error : scheme.primary,
+                            foregroundColor: on
+                                ? scheme.onError
+                                : scheme.onPrimary,
+                          ),
+                          child: Text(on ? 'Clock off' : 'Clock on'),
+                        ),
+                ],
               ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      on ? 'On shift' : 'Not on shift',
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: on ? scheme.onTertiaryContainer : null,
-                      ),
+
+              // Only while clocked on: there is nothing to take a break from
+              // otherwise.
+              if (on) ...[
+                const SizedBox(height: 6),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: shifts.isBusy ? null : onToggleBreak,
+                    icon: Icon(
+                      onBreak
+                          ? Icons.play_arrow
+                          : Icons.free_breakfast_outlined,
+                      size: 18,
                     ),
-                    Text(
-                      switch ((on, shift)) {
-                        (true, final Shift current) => [
-                          formatDuration(current.duration),
-                          if (current.vehicleLabel case final String van) van,
-                          if (current.startedByTag) 'tag',
-                        ].join(' · '),
-                        _ => 'Tap your van tag, or start without one.',
-                      },
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: on
-                            ? scheme.onTertiaryContainer
-                            : scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
+                    label: Text(onBreak ? 'Back to work' : 'Take a break'),
+                    style: TextButton.styleFrom(foregroundColor: onSurface),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              shifts.isBusy
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : FilledButton(
-                      onPressed: onToggle,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: on ? scheme.error : scheme.primary,
-                        foregroundColor: on ? scheme.onError : scheme.onPrimary,
-                      ),
-                      child: Text(on ? 'Clock off' : 'Clock on'),
-                    ),
+              ],
             ],
           ),
         ),
@@ -722,18 +891,14 @@ class _ShiftCard extends StatelessWidget {
 /// the screen — but a warning promotes itself to a full line because ice or
 /// fog changes how the round should be driven.
 class _WeatherCard extends StatelessWidget {
-  const _WeatherCard({
-    required this.weather,
-    required this.unit,
-    required this.fahrenheit,
-  });
+  const _WeatherCard({required this.weather, required this.settings});
 
   final Weather? weather;
-  final DistanceUnit unit;
 
-  /// Resolved by [AppSettings.usesFahrenheit], so "match my units" is already
-  /// decided by the time it reaches the card.
-  final bool fahrenheit;
+  /// Taken whole rather than as four resolved units: the card reads four of
+  /// them and the settings object already knows how to resolve "match my
+  /// units" for each.
+  final AppSettings settings;
 
   @override
   Widget build(BuildContext context) {
@@ -784,7 +949,7 @@ class _WeatherCard extends StatelessWidget {
                   Text(
                     formatTemperature(
                       current.temperatureC,
-                      fahrenheit: fahrenheit,
+                      fahrenheit: settings.usesFahrenheit,
                     ),
                     style: theme.textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w700,
@@ -794,9 +959,17 @@ class _WeatherCard extends StatelessWidget {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      '${current.description} · '
-                      '${formatWindSpeed(current.windKph, unit: unit)} wind · '
-                      'feels ${formatTemperature(current.feelsLikeC, fahrenheit: fahrenheit)}',
+                      [
+                        current.description,
+                        '${formatWindSpeed(current.windKph, unit: settings.resolvedWindUnit)} wind',
+                        'feels ${formatTemperature(current.feelsLikeC, fahrenheit: settings.usesFahrenheit)}',
+                        // Only when there is actually something falling.
+                        if (current.precipitationMm > 0)
+                          formatPrecipitation(
+                            current.precipitationMm,
+                            unit: settings.resolvedPrecipitationUnit,
+                          ),
+                      ].join(' · '),
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: warning == null
                             ? scheme.onSurfaceVariant

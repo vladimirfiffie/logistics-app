@@ -25,6 +25,7 @@ Future<bool> completeDelivery(BuildContext context, Delivery delivery) async {
     context,
     delivery,
     requirePhoto: settings.requireProofPhoto,
+    signatureMode: settings.signatureMode,
   );
   if (proof == null || !context.mounted) return false;
 
@@ -36,10 +37,19 @@ Future<bool> completeDelivery(BuildContext context, Delivery delivery) async {
     delivery,
     recipientName: proof.recipientName,
     proofPhotoPath: proof.photoPath,
+    signaturePath: proof.signaturePath,
   );
   await AppHaptics.delivered();
 
-  if (!settings.celebrateDeliveries || !context.mounted) return true;
+  if (!context.mounted) return true;
+  final next = deliveries.openStops.isEmpty ? null : deliveries.openStops.first;
+
+  // Skipping the celebration must not also skip the auto-start: they are
+  // separate choices.
+  if (!settings.celebrateDeliveries) {
+    if (settings.autoTrackNextStop) await _startNext(context, next);
+    return true;
+  }
 
   // Read back the trip so the celebration shows the finished odometer rather
   // than the running one.
@@ -47,15 +57,46 @@ Future<bool> completeDelivery(BuildContext context, Delivery delivery) async {
   if (!context.mounted) return true;
 
   final remaining = deliveries.openStops;
-  await DeliveryOutcomeSheet.show(
+  final startNext = await DeliveryOutcomeSheet.show(
     context,
     delivery: delivery,
     trip: trip,
     unit: settings.distanceUnit,
     remainingStops: remaining.length,
-    nextStop: remaining.isEmpty ? null : remaining.first,
+    nextStop: next,
   );
+
+  // The setting starts the next stop without asking; the button on the sheet
+  // is how someone who has it switched off does it just this once.
+  if (settings.autoTrackNextStop || (startNext ?? false)) {
+    if (context.mounted) await _startNext(context, next);
+  }
   return true;
+}
+
+/// Begins recording [next], if there is one and nothing else is running.
+///
+/// Best-effort by design: this is a convenience on top of a delivery that has
+/// already been recorded, so a refused permission or a busy recorder is
+/// reported and dropped rather than being allowed to look like the delivery
+/// itself failed.
+Future<void> _startNext(BuildContext context, Delivery? next) async {
+  if (next == null) return;
+  final tracking = context.read<TrackingController>();
+  if (tracking.isTracking) return;
+
+  final messenger = ScaffoldMessenger.of(context);
+  final started = await tracking.start(next);
+  if (started) {
+    await AppHaptics.trackingStarted();
+    messenger.showSnackBar(
+      SnackBar(content: Text('Now tracking ${next.customerName}.')),
+    );
+    return;
+  }
+
+  await AppHaptics.error();
+  messenger.showSnackBar(SnackBar(content: Text(tracking.readiness.message)));
 }
 
 /// Records a stop that could not be completed. Returns true if a reason was

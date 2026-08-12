@@ -42,6 +42,13 @@ class SettingsController extends ChangeNotifier {
   static const _dateStyleKey = 'settings.date_style';
   static const _clockStyleKey = 'settings.clock_style';
   static const _nfcClockOnKey = 'settings.nfc_clock_on';
+  static const _windKey = 'settings.wind_unit';
+  static const _precipitationKey = 'settings.precipitation_unit';
+  static const _defaultSortKey = 'settings.default_sort';
+  static const _signatureKey = 'settings.signature_mode';
+  static const _autoTrackKey = 'settings.auto_track_next_stop';
+  static const _onShiftNotificationKey = 'settings.on_shift_notification';
+  static const _breakReminderKey = 'settings.break_reminder_minutes';
 
   AppSettings _settings = const AppSettings();
   bool _isLoaded = false;
@@ -104,6 +111,29 @@ class SettingsController extends ChangeNotifier {
         ClockStyle.twentyFour,
       ),
       nfcClockOn: prefs.getBool(_nfcClockOnKey) ?? true,
+      windUnit: _readEnum(
+        prefs.getString(_windKey),
+        WindUnit.values,
+        WindUnit.matchUnits,
+      ),
+      precipitationUnit: _readEnum(
+        prefs.getString(_precipitationKey),
+        PrecipitationUnit.values,
+        PrecipitationUnit.matchUnits,
+      ),
+      defaultSort: _readEnum(
+        prefs.getString(_defaultSortKey),
+        StopSort.values,
+        StopSort.time,
+      ),
+      signatureMode: _readEnum(
+        prefs.getString(_signatureKey),
+        SignatureMode.values,
+        SignatureMode.optional,
+      ),
+      autoTrackNextStop: prefs.getBool(_autoTrackKey) ?? false,
+      onShiftNotification: prefs.getBool(_onShiftNotificationKey) ?? true,
+      breakReminderMinutes: prefs.getInt(_breakReminderKey) ?? 0,
     );
     _isLoaded = true;
     _syncMirrors();
@@ -232,6 +262,48 @@ class SettingsController extends ChangeNotifier {
     });
   }
 
+  Future<void> setWindUnit(WindUnit value) async {
+    await _update(_settings.copyWith(windUnit: value), (prefs) {
+      return prefs.setString(_windKey, value.name);
+    });
+  }
+
+  Future<void> setPrecipitationUnit(PrecipitationUnit value) async {
+    await _update(_settings.copyWith(precipitationUnit: value), (prefs) {
+      return prefs.setString(_precipitationKey, value.name);
+    });
+  }
+
+  Future<void> setDefaultSort(StopSort value) async {
+    await _update(_settings.copyWith(defaultSort: value), (prefs) {
+      return prefs.setString(_defaultSortKey, value.name);
+    });
+  }
+
+  Future<void> setSignatureMode(SignatureMode value) async {
+    await _update(_settings.copyWith(signatureMode: value), (prefs) {
+      return prefs.setString(_signatureKey, value.name);
+    });
+  }
+
+  Future<void> setAutoTrackNextStop(bool value) async {
+    await _update(_settings.copyWith(autoTrackNextStop: value), (prefs) {
+      return prefs.setBool(_autoTrackKey, value);
+    });
+  }
+
+  Future<void> setOnShiftNotification(bool value) async {
+    await _update(_settings.copyWith(onShiftNotification: value), (prefs) {
+      return prefs.setBool(_onShiftNotificationKey, value);
+    });
+  }
+
+  Future<void> setBreakReminderMinutes(int value) async {
+    await _update(_settings.copyWith(breakReminderMinutes: value), (prefs) {
+      return prefs.setInt(_breakReminderKey, value);
+    });
+  }
+
   /// Puts everything back to defaults.
   Future<void> resetToDefaults() async {
     final prefs = await SharedPreferences.getInstance();
@@ -256,6 +328,13 @@ class SettingsController extends ChangeNotifier {
       _dateStyleKey,
       _clockStyleKey,
       _nfcClockOnKey,
+      _windKey,
+      _precipitationKey,
+      _defaultSortKey,
+      _signatureKey,
+      _autoTrackKey,
+      _onShiftNotificationKey,
+      _breakReminderKey,
     ]) {
       await prefs.remove(key);
     }

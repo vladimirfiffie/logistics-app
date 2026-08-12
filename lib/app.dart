@@ -38,7 +38,10 @@ class LogisticsApp extends StatelessWidget {
         Provider<LocationService>.value(value: locationService),
         Provider<NfcService>(create: (_) => NfcService()),
         ChangeNotifierProvider<ShiftController>(
-          create: (_) => ShiftController(repository)..load(),
+          create: (_) => ShiftController(
+            repository,
+            settings: () => settingsController.settings,
+          )..load(),
         ),
         Provider<WeatherService>(
           create: (_) => WeatherService(),

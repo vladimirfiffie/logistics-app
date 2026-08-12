@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:logistics_app/data/app_database.dart';
 import 'package:logistics_app/data/local_delivery_repository.dart';
 import 'package:logistics_app/models/delivery.dart';
@@ -205,6 +208,67 @@ void main() {
       (await repository.fetchDelivery('1'))!.status,
       DeliveryStatus.delivered,
     );
+  });
+
+  test('clearing history deletes the proof files too', () async {
+    final folder = await Directory.systemTemp.createTemp('proofs');
+    final photo = File(p.join(folder.path, 'photo.jpg'))
+      ..writeAsStringSync('jpeg');
+    final signature = File(p.join(folder.path, 'signature.png'))
+      ..writeAsStringSync('png');
+    final keep = File(p.join(folder.path, 'open.jpg'))
+      ..writeAsStringSync('jpeg');
+
+    await repository.saveDelivery(
+      _stop('closed').copyWith(
+        status: DeliveryStatus.delivered,
+        proofPhotoPath: photo.path,
+        signaturePath: signature.path,
+      ),
+    );
+    await repository.saveDelivery(
+      _stop('open').copyWith(proofPhotoPath: keep.path),
+    );
+
+    final removed = await repository.deleteClosedDeliveries();
+
+    expect(removed, 1);
+    // SQLite knows nothing about files, so without this the photos outlive
+    // every trace of the delivery they belong to.
+    expect(photo.existsSync(), isFalse);
+    expect(signature.existsSync(), isFalse);
+    expect(keep.existsSync(), isTrue, reason: 'the open stop is untouched');
+
+    folder.deleteSync(recursive: true);
+  });
+
+  test('a missing proof file does not break clearing history', () async {
+    await repository.saveDelivery(
+      _stop('closed').copyWith(
+        status: DeliveryStatus.failed,
+        proofPhotoPath: '/no/such/path/photo.jpg',
+      ),
+    );
+
+    // Storage unmounted, file already gone, path from another install — none
+    // of it should turn "clear history" into an error.
+    expect(await repository.deleteClosedDeliveries(), 1);
+    expect(await repository.fetchDeliveries(), isEmpty);
+  });
+
+  test('starting a fresh day clears the attachments as well', () async {
+    final folder = await Directory.systemTemp.createTemp('proofs');
+    final photo = File(p.join(folder.path, 'photo.jpg'))
+      ..writeAsStringSync('jpeg');
+
+    await repository.saveDelivery(
+      _stop('1').copyWith(proofPhotoPath: photo.path),
+    );
+
+    await repository.deleteEverything();
+
+    expect(photo.existsSync(), isFalse);
+    folder.deleteSync(recursive: true);
   });
 
   test('breadcrumbs read back in the order they were recorded', () async {

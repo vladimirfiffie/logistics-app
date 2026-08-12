@@ -5,12 +5,18 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../models/app_settings.dart';
 import '../models/delivery.dart';
 import '../services/app_haptics.dart';
 import 'widgets/app_sheet.dart';
+import 'widgets/signature_pad.dart';
 
 /// What the driver captured when closing out a stop.
-typedef ProofOfDelivery = ({String? recipientName, String? photoPath});
+typedef ProofOfDelivery = ({
+  String? recipientName,
+  String? photoPath,
+  String? signaturePath,
+});
 
 /// Bottom sheet for confirming a delivery: who signed for it and a photo of
 /// where it was left.
@@ -19,9 +25,13 @@ class CompleteDeliverySheet extends StatefulWidget {
     super.key,
     required this.delivery,
     this.requirePhoto = false,
+    this.signatureMode = SignatureMode.optional,
   });
 
   final Delivery delivery;
+
+  /// Whether the pad is hidden, offered, or demanded.
+  final SignatureMode signatureMode;
 
   /// When set, the stop cannot be closed until a photo has been taken. The
   /// enforcement lives here rather than after the sheet closes, so the driver
@@ -33,13 +43,17 @@ class CompleteDeliverySheet extends StatefulWidget {
     BuildContext context,
     Delivery delivery, {
     bool requirePhoto = false,
+    SignatureMode signatureMode = SignatureMode.optional,
   }) {
     return showAppSheet<ProofOfDelivery>(
       context,
       // A swipe-away here would discard a captured photo and a typed name.
       dismissible: false,
-      builder: (_) =>
-          CompleteDeliverySheet(delivery: delivery, requirePhoto: requirePhoto),
+      builder: (_) => CompleteDeliverySheet(
+        delivery: delivery,
+        requirePhoto: requirePhoto,
+        signatureMode: signatureMode,
+      ),
     );
   }
 
@@ -49,9 +63,24 @@ class CompleteDeliverySheet extends StatefulWidget {
 
 class _CompleteDeliverySheetState extends State<CompleteDeliverySheet> {
   final _recipientController = TextEditingController();
+  final _signatureKey = GlobalKey<SignaturePadState>();
   String? _photoPath;
   bool _isCapturing = false;
+  bool _isSigning = false;
+  bool _showSignature = false;
+  bool _hasSigned = false;
   String? _captureError;
+
+  /// A required signature opens the pad straight away — there is no sense
+  /// making the driver tap to reveal something they cannot skip.
+  @override
+  void initState() {
+    super.initState();
+    _showSignature = widget.signatureMode == SignatureMode.required;
+  }
+
+  bool get _signatureMissing =>
+      widget.signatureMode == SignatureMode.required && !_hasSigned;
 
   @override
   void dispose() {
@@ -98,6 +127,31 @@ class _CompleteDeliverySheetState extends State<CompleteDeliverySheet> {
     return target;
   }
 
+  /// Rasterising the signature is the one slow step here, so it happens on
+  /// confirm rather than on every stroke.
+  Future<void> _confirm() async {
+    setState(() => _isSigning = true);
+    String? signature;
+    try {
+      signature = await _signatureKey.currentState?.save(
+        reference: widget.delivery.reference,
+      );
+    } catch (error) {
+      // A signature that will not save must not block the delivery: the photo
+      // and the name are still proof, and the driver is at the door.
+      debugPrint('could not save signature: $error');
+    }
+    if (!mounted) return;
+    setState(() => _isSigning = false);
+
+    final name = _recipientController.text.trim();
+    Navigator.of(context).pop((
+      recipientName: name.isEmpty ? null : name,
+      photoPath: _photoPath,
+      signaturePath: signature,
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -134,6 +188,17 @@ class _CompleteDeliverySheetState extends State<CompleteDeliverySheet> {
                 prefixIcon: Icon(Icons.person_outline),
               ),
             ),
+            if (widget.signatureMode != SignatureMode.off) ...[
+              const SizedBox(height: 16),
+              _SignatureSlot(
+                padKey: _signatureKey,
+                expanded: _showSignature,
+                required: widget.signatureMode == SignatureMode.required,
+                onToggle: () =>
+                    setState(() => _showSignature = !_showSignature),
+                onChanged: (signed) => setState(() => _hasSigned = signed),
+              ),
+            ],
             const SizedBox(height: 16),
             _PhotoSlot(
               path: _photoPath,
@@ -152,6 +217,17 @@ class _CompleteDeliverySheetState extends State<CompleteDeliverySheet> {
               ),
             ],
             const SizedBox(height: 20),
+            if (_signatureMissing)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Text(
+                  'A signature is required before this stop can be closed.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
             if (widget.requirePhoto && _photoPath == null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 10),
@@ -165,15 +241,17 @@ class _CompleteDeliverySheetState extends State<CompleteDeliverySheet> {
                 ),
               ),
             FilledButton.icon(
-              onPressed: widget.requirePhoto && _photoPath == null
+              onPressed:
+                  (widget.requirePhoto && _photoPath == null) || _isSigning
                   ? null
-                  : () => Navigator.of(context).pop((
-                      recipientName: _recipientController.text.trim().isEmpty
-                          ? null
-                          : _recipientController.text.trim(),
-                      photoPath: _photoPath,
-                    )),
-              icon: const Icon(Icons.check),
+                  : _confirm,
+              icon: _isSigning
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.check),
               label: const Text('Mark as delivered'),
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(50),
@@ -262,6 +340,89 @@ class _PhotoSlot extends StatelessWidget {
         side: required ? BorderSide(color: scheme.error, width: 1.5) : null,
         foregroundColor: required ? scheme.error : null,
       ),
+    );
+  }
+}
+
+/// The signature pad, collapsed until asked for.
+///
+/// Most drops do not need one — it is a depot-by-depot thing — and an
+/// always-open pad would push the camera button off a small screen.
+class _SignatureSlot extends StatelessWidget {
+  const _SignatureSlot({
+    required this.padKey,
+    required this.expanded,
+    required this.required,
+    required this.onToggle,
+    required this.onChanged,
+  });
+
+  final GlobalKey<SignaturePadState> padKey;
+  final bool expanded;
+  final bool required;
+  final VoidCallback onToggle;
+
+  /// Fired with whether the pad now holds anything, so the parent can enable
+  /// or block the confirm button without polling the pad's state.
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    if (!expanded) {
+      return OutlinedButton.icon(
+        onPressed: onToggle,
+        icon: const Icon(Icons.draw_outlined),
+        label: const Text('Add a signature (optional)'),
+        style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          required ? 'Signature (required)' : 'Signature',
+          style: TextStyle(
+            color: required ? scheme.error : scheme.onSurfaceVariant,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 6),
+        SignaturePad(
+          key: padKey,
+          onChanged: onChanged,
+          borderColor: required ? scheme.error : null,
+        ),
+        const SizedBox(height: 6),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            TextButton.icon(
+              onPressed: () {
+                padKey.currentState?.clear();
+                onChanged(false);
+              },
+              icon: const Icon(Icons.undo, size: 18),
+              label: const Text('Clear'),
+            ),
+            // A required signature has no "remove": the only way past it is
+            // to sign.
+            if (!required)
+              TextButton.icon(
+                onPressed: () {
+                  padKey.currentState?.clear();
+                  onChanged(false);
+                  onToggle();
+                },
+                icon: const Icon(Icons.close, size: 18),
+                label: const Text('Remove'),
+              ),
+          ],
+        ),
+      ],
     );
   }
 }

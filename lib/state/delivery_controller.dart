@@ -72,6 +72,7 @@ class DeliveryController extends ChangeNotifier {
     Delivery delivery, {
     String? recipientName,
     String? proofPhotoPath,
+    String? signaturePath,
   }) async {
     await _save(
       delivery.copyWith(
@@ -79,6 +80,7 @@ class DeliveryController extends ChangeNotifier {
         completedAt: DateTime.now(),
         recipientName: recipientName,
         proofPhotoPath: proofPhotoPath,
+        signaturePath: signaturePath,
       ),
     );
   }

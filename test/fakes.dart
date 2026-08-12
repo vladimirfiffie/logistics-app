@@ -5,6 +5,7 @@ import 'package:logistics_app/data/delivery_repository.dart';
 import 'package:logistics_app/models/app_settings.dart';
 import 'package:logistics_app/models/delivery.dart';
 import 'package:logistics_app/models/shift.dart';
+import 'package:logistics_app/models/shift_break.dart';
 import 'package:logistics_app/models/trip.dart';
 import 'package:logistics_app/models/trip_point.dart';
 import 'package:logistics_app/services/location_service.dart';
@@ -110,6 +111,7 @@ class FakeDeliveryRepository implements DeliveryRepository {
     deliveries.clear();
     trips.clear();
     points.clear();
+    breaks.clear();
     shifts.clear();
   }
 
@@ -147,13 +149,78 @@ class FakeDeliveryRepository implements DeliveryRepository {
   Future<Shift> endShift(String shiftId) async {
     final shift = shifts[shiftId];
     if (shift == null) throw StateError('No such shift');
+    if (!shift.isActive) throw StateError('Shift $shiftId already ended');
     final ended = shift.copyWith(endedAt: DateTime.now());
     shifts[shiftId] = ended;
+
+    // Matches the SQLite repository: a break left running ends with the
+    // shift rather than counting forever.
+    for (final entry in breaks.entries.toList()) {
+      if (entry.value.shiftId == shiftId && entry.value.isActive) {
+        breaks[entry.key] = entry.value.copyWith(endedAt: DateTime.now());
+      }
+    }
     return ended;
   }
 
   @override
   Future<List<Shift>> fetchShifts() async => shifts.values.toList();
+
+  final Map<String, ShiftBreak> breaks = {};
+  var _nextBreakId = 0;
+
+  @override
+  Future<ShiftBreak?> activeBreak(String shiftId) async {
+    for (final taken in breaks.values) {
+      if (taken.shiftId == shiftId && taken.isActive) return taken;
+    }
+    return null;
+  }
+
+  @override
+  Future<ShiftBreak> startBreak(
+    String shiftId, {
+    BreakKind kind = BreakKind.rest,
+  }) async {
+    if (await activeBreak(shiftId) != null) {
+      throw StateError('A break is already running.');
+    }
+    final taken = ShiftBreak(
+      id: 'break-${_nextBreakId++}',
+      shiftId: shiftId,
+      startedAt: DateTime.now(),
+      kind: kind,
+    );
+    breaks[taken.id] = taken;
+    return taken;
+  }
+
+  @override
+  Future<ShiftBreak> endBreak(String breakId) async {
+    final taken = breaks[breakId];
+    if (taken == null) throw StateError('No such break');
+    if (!taken.isActive) throw StateError('Break $breakId already ended');
+    final ended = taken.copyWith(endedAt: DateTime.now());
+    breaks[breakId] = ended;
+    return ended;
+  }
+
+  @override
+  Future<List<ShiftBreak>> breaksForShift(String shiftId) async =>
+      breaks.values.where((taken) => taken.shiftId == shiftId).toList()
+        ..sort((a, b) => a.startedAt.compareTo(b.startedAt));
+
+  @override
+  Future<Map<String, List<ShiftBreak>>> breaksForShifts(
+    List<String> shiftIds,
+  ) async {
+    final grouped = <String, List<ShiftBreak>>{};
+    for (final taken in breaks.values) {
+      if (!shiftIds.contains(taken.shiftId)) continue;
+      grouped.putIfAbsent(taken.shiftId, () => []).add(taken);
+    }
+    return grouped;
+  }
 
   @override
   Future<Trip> endTrip(String tripId, {required double distanceMeters}) async {

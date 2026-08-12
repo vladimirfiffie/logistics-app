@@ -8,7 +8,8 @@ class AppDatabase {
   static const _fileName = 'logistics.db';
 
   /// v2 added the `shifts` table.
-  static const _version = 2;
+  /// v3 added the `breaks` table and `deliveries.signature_path`.
+  static const _version = 3;
 
   static Database? _instance;
 
@@ -49,6 +50,7 @@ class AppDatabase {
         completed_at INTEGER,
         recipient_name TEXT,
         proof_photo_path TEXT,
+        signature_path TEXT,
         failure_reason TEXT
       )
     ''');
@@ -84,6 +86,7 @@ class AppDatabase {
     await db.execute('CREATE INDEX idx_trips_delivery ON trips(delivery_id)');
 
     await _createShifts(db);
+    await _createBreaks(db);
   }
 
   static Future<void> _createShifts(Database db) async {
@@ -99,6 +102,21 @@ class AppDatabase {
     await db.execute('CREATE INDEX idx_shifts_started ON shifts(started_at)');
   }
 
+  /// Breaks belong to a shift and go with it: a deleted shift has no breaks to
+  /// account for.
+  static Future<void> _createBreaks(Database db) async {
+    await db.execute('''
+      CREATE TABLE breaks (
+        id TEXT PRIMARY KEY,
+        shift_id TEXT NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
+        started_at INTEGER NOT NULL,
+        ended_at INTEGER,
+        kind TEXT NOT NULL
+      )
+    ''');
+    await db.execute('CREATE INDEX idx_breaks_shift ON breaks(shift_id)');
+  }
+
   /// Migrations run in order, each guarded by the version it introduced, so a
   /// device two versions behind catches up in one open rather than needing a
   /// reinstall.
@@ -108,9 +126,20 @@ class AppDatabase {
     int newVersion,
   ) async {
     if (oldVersion < 2) await _createShifts(db);
+    if (oldVersion < 3) {
+      await _createBreaks(db);
+      await db.execute('ALTER TABLE deliveries ADD COLUMN signature_path TEXT');
+    }
   }
 
   /// Schema statements, exposed so tests can build the same tables in memory.
   static Future<void> createSchemaForTesting(Database db) =>
       _createSchema(db, _version);
+
+  /// Exposed so a test can prove an install two versions behind catches up
+  /// without losing what it already had.
+  static Future<void> upgradeSchemaForTesting(Database db, int from) =>
+      _upgradeSchema(db, from, _version);
+
+  static int get schemaVersion => _version;
 }

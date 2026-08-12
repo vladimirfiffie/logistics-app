@@ -36,6 +36,7 @@ class Delivery {
     this.completedAt,
     this.recipientName,
     this.proofPhotoPath,
+    this.signaturePath,
     this.failureReason,
   });
 
@@ -57,13 +58,25 @@ class Delivery {
   final DateTime? completedAt;
   final String? recipientName;
   final String? proofPhotoPath;
+
+  /// PNG of the recipient's signature, written next to the proof photo.
+  final String? signaturePath;
+
   final String? failureReason;
+
+  /// Files this stop owns on disk. Deleting the row has to delete these too,
+  /// or they outlive every trace of the delivery they belong to.
+  Iterable<String> get attachmentPaths => [
+    if (proofPhotoPath case final String path) path,
+    if (signaturePath case final String path) path,
+  ];
 
   Delivery copyWith({
     DeliveryStatus? status,
     DateTime? completedAt,
     String? recipientName,
     String? proofPhotoPath,
+    String? signaturePath,
     String? failureReason,
   }) {
     return Delivery(
@@ -80,6 +93,7 @@ class Delivery {
       completedAt: completedAt ?? this.completedAt,
       recipientName: recipientName ?? this.recipientName,
       proofPhotoPath: proofPhotoPath ?? this.proofPhotoPath,
+      signaturePath: signaturePath ?? this.signaturePath,
       failureReason: failureReason ?? this.failureReason,
     );
   }
@@ -98,6 +112,7 @@ class Delivery {
     'completed_at': completedAt?.toUtc().millisecondsSinceEpoch,
     'recipient_name': recipientName,
     'proof_photo_path': proofPhotoPath,
+    'signature_path': signaturePath,
     'failure_reason': failureReason,
   };
 
@@ -124,6 +139,7 @@ class Delivery {
     },
     recipientName: map['recipient_name'] as String?,
     proofPhotoPath: map['proof_photo_path'] as String?,
+    signaturePath: map['signature_path'] as String?,
     failureReason: map['failure_reason'] as String?,
   );
 }

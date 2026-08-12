@@ -14,10 +14,12 @@ class NotificationService {
 
   static const _arrivalChannelId = 'arrival';
   static const _summaryChannelId = 'summary';
+  static const _shiftChannelId = 'shift';
 
   /// Distinct ids so an arrival alert never replaces the day's summary.
   static const _arrivalId = 1001;
   static const _summaryId = 1002;
+  static const _shiftId = 1003;
 
   bool _ready = false;
 
@@ -97,7 +99,56 @@ class NotificationService {
     priority: Priority.defaultPriority,
   );
 
+  /// Ongoing "you are on the clock" notification.
+  ///
+  /// Silent and low importance: it is a status line, not an alert. Ongoing so
+  /// it cannot be swiped away by accident — the whole point is that it is
+  /// still there when the driver checks two hours later, behind whatever nav
+  /// app is on screen.
+  Future<void> showOnShift({
+    required DateTime since,
+    String? vehicleLabel,
+    bool onBreak = false,
+  }) {
+    final started =
+        '${since.hour.toString().padLeft(2, '0')}:'
+        '${since.minute.toString().padLeft(2, '0')}';
+    return _show(
+      id: _shiftId,
+      channelId: _shiftChannelId,
+      channelName: 'On shift',
+      channelDescription: 'Shows for as long as you are clocked on.',
+      title: onBreak ? 'On a break' : 'On shift',
+      body: [
+        'Clocked on at $started',
+        if (vehicleLabel != null && vehicleLabel.isNotEmpty) vehicleLabel,
+      ].join(' · '),
+      importance: Importance.low,
+      priority: Priority.low,
+      ongoing: true,
+      autoCancel: false,
+    );
+  }
+
+  /// "You have been going a while." Fires once when the configured stretch is
+  /// up; the shift notification carries on regardless.
+  Future<void> showBreakDue({required Duration worked}) => _show(
+    id: _shiftId + 1,
+    channelId: _shiftChannelId,
+    channelName: 'On shift',
+    channelDescription: 'Shows for as long as you are clocked on.',
+    title: 'Time for a break',
+    body: "You've been on shift for ${worked.inHours}h without one.",
+    importance: Importance.defaultImportance,
+    priority: Priority.defaultPriority,
+  );
+
   Future<void> cancelArrival() => _cancel(_arrivalId);
+
+  Future<void> cancelOnShift() async {
+    await _cancel(_shiftId);
+    await _cancel(_shiftId + 1);
+  }
 
   Future<void> _show({
     required int id,
@@ -108,6 +159,8 @@ class NotificationService {
     required String body,
     required Importance importance,
     required Priority priority,
+    bool ongoing = false,
+    bool autoCancel = true,
   }) async {
     await initialise();
     if (!_ready) return;
@@ -123,9 +176,13 @@ class NotificationService {
             channelDescription: channelDescription,
             importance: importance,
             priority: priority,
-            // Auto-cancel: tapping it should clear it, not leave the driver
-            // swiping away stale alerts at the end of a round.
-            autoCancel: true,
+            // Tapping an alert should clear it, not leave the driver swiping
+            // away stale notifications at the end of a round. Ongoing status
+            // notifications opt out — they are cancelled by the code that
+            // posted them.
+            autoCancel: autoCancel,
+            ongoing: ongoing,
+            silent: ongoing,
           ),
         ),
       );

@@ -30,6 +30,37 @@ enum TemperatureUnit {
   final String detail;
 }
 
+/// Wind speed on the weather card.
+///
+/// Its own setting rather than following [DistanceUnit]: a driver reading
+/// kilometres may still think of wind in mph, and anyone near the coast reads
+/// it in knots. [matchUnits] keeps the old behaviour for anyone who does not
+/// care.
+enum WindUnit {
+  matchUnits('Match my units', 'km/h with km, mph with miles'),
+  kmh('Kilometres per hour', 'km/h'),
+  mph('Miles per hour', 'mph'),
+  metresPerSecond('Metres per second', 'm/s'),
+  knots('Knots', 'kn');
+
+  const WindUnit(this.label, this.detail);
+
+  final String label;
+  final String detail;
+}
+
+/// Rain and snow on the weather card.
+enum PrecipitationUnit {
+  matchUnits('Match my units', 'mm with km, inches with miles'),
+  millimetres('Millimetres', 'mm'),
+  inches('Inches', 'in');
+
+  const PrecipitationUnit(this.label, this.detail);
+
+  final String label;
+  final String detail;
+}
+
 /// How a date reads across the app. The pattern is fed straight to `intl`.
 enum DateStyle {
   dayMonth('Wed 12 Aug', 'EEE d MMM'),
@@ -134,6 +165,40 @@ enum AccentColor {
   final Color seed;
 }
 
+/// Default order for the manifest. Lives here rather than in the tab so the
+/// driver's choice survives a restart.
+enum StopSort {
+  time('Time', 'The slots as dispatched.', Icons.schedule),
+  distance('Distance', 'Nearest to you first.', Icons.near_me_outlined),
+  route(
+    'Best route',
+    'Nearest-neighbour order. A suggestion, not a plan.',
+    Icons.alt_route,
+  ),
+  name('A–Z', 'By customer name.', Icons.sort_by_alpha);
+
+  const StopSort(this.label, this.detail, this.icon);
+
+  final String label;
+  final String detail;
+  final IconData icon;
+
+  /// Distance and route both measure from the driver, so both need a fix.
+  bool get needsFix => this == StopSort.distance || this == StopSort.route;
+}
+
+/// Whether closing out a stop asks for a signature.
+enum SignatureMode {
+  off('Never', 'No signature pad on the completion sheet.'),
+  optional('Optional', 'A button to open the pad when you want one.'),
+  required('Required', 'A stop cannot be closed without one.');
+
+  const SignatureMode(this.label, this.detail);
+
+  final String label;
+  final String detail;
+}
+
 /// How the live map behaves by default when a trip starts.
 enum MapFollowMode {
   follow('Follow me', 'Keep the map centred on your position.'),
@@ -167,9 +232,16 @@ class AppSettings {
     this.arrivalRadiusMeters = 150,
     this.showWeather = true,
     this.temperatureUnit = TemperatureUnit.matchUnits,
+    this.windUnit = WindUnit.matchUnits,
+    this.precipitationUnit = PrecipitationUnit.matchUnits,
     this.dateStyle = DateStyle.dayMonth,
     this.clockStyle = ClockStyle.twentyFour,
     this.nfcClockOn = true,
+    this.defaultSort = StopSort.time,
+    this.signatureMode = SignatureMode.optional,
+    this.autoTrackNextStop = false,
+    this.onShiftNotification = true,
+    this.breakReminderMinutes = 0,
   });
 
   final ThemeChoice theme;
@@ -232,6 +304,12 @@ class AppSettings {
   /// the two do not always pair the way you would expect.
   final TemperatureUnit temperatureUnit;
 
+  /// Wind speed on the weather card.
+  final WindUnit windUnit;
+
+  /// Rain and snow on the weather card.
+  final PrecipitationUnit precipitationUnit;
+
   /// How dates read everywhere in the app.
   final DateStyle dateStyle;
 
@@ -244,6 +322,26 @@ class AppSettings {
   /// driver who never stuck a tag in the van.
   final bool nfcClockOn;
 
+  /// Which order the manifest opens in.
+  final StopSort defaultSort;
+
+  /// Whether the completion sheet offers, demands, or hides the signature pad.
+  final SignatureMode signatureMode;
+
+  /// Start recording the next stop the moment one is closed out. Off by
+  /// default: it starts the GPS without being asked, which should be the
+  /// driver's decision rather than a surprise.
+  final bool autoTrackNextStop;
+
+  /// A persistent notification for as long as the driver is clocked on. The
+  /// app is usually behind a nav app, and "am I still on the clock?" is worth
+  /// answering from the shade.
+  final bool onShiftNotification;
+
+  /// Remind the driver to take a break after this many minutes on shift.
+  /// Zero switches it off.
+  final int breakReminderMinutes;
+
   /// Which unit the weather card should actually render, with
   /// [TemperatureUnit.matchUnits] resolved against [distanceUnit].
   bool get usesFahrenheit => switch (temperatureUnit) {
@@ -251,6 +349,23 @@ class AppSettings {
     TemperatureUnit.fahrenheit => true,
     TemperatureUnit.matchUnits => distanceUnit == DistanceUnit.imperial,
   };
+
+  /// [windUnit] with `matchUnits` resolved, so nothing downstream has to know
+  /// about the distance setting.
+  WindUnit get resolvedWindUnit => switch (windUnit) {
+    WindUnit.matchUnits =>
+      distanceUnit == DistanceUnit.imperial ? WindUnit.mph : WindUnit.kmh,
+    final WindUnit chosen => chosen,
+  };
+
+  PrecipitationUnit get resolvedPrecipitationUnit =>
+      switch (precipitationUnit) {
+        PrecipitationUnit.matchUnits =>
+          distanceUnit == DistanceUnit.imperial
+              ? PrecipitationUnit.inches
+              : PrecipitationUnit.millimetres,
+        final PrecipitationUnit chosen => chosen,
+      };
 
   AppSettings copyWith({
     ThemeChoice? theme,
@@ -270,9 +385,16 @@ class AppSettings {
     int? arrivalRadiusMeters,
     bool? showWeather,
     TemperatureUnit? temperatureUnit,
+    WindUnit? windUnit,
+    PrecipitationUnit? precipitationUnit,
     DateStyle? dateStyle,
     ClockStyle? clockStyle,
     bool? nfcClockOn,
+    StopSort? defaultSort,
+    SignatureMode? signatureMode,
+    bool? autoTrackNextStop,
+    bool? onShiftNotification,
+    int? breakReminderMinutes,
   }) => AppSettings(
     theme: theme ?? this.theme,
     accent: accent ?? this.accent,
@@ -291,9 +413,16 @@ class AppSettings {
     arrivalRadiusMeters: arrivalRadiusMeters ?? this.arrivalRadiusMeters,
     showWeather: showWeather ?? this.showWeather,
     temperatureUnit: temperatureUnit ?? this.temperatureUnit,
+    windUnit: windUnit ?? this.windUnit,
+    precipitationUnit: precipitationUnit ?? this.precipitationUnit,
     dateStyle: dateStyle ?? this.dateStyle,
     clockStyle: clockStyle ?? this.clockStyle,
     nfcClockOn: nfcClockOn ?? this.nfcClockOn,
+    defaultSort: defaultSort ?? this.defaultSort,
+    signatureMode: signatureMode ?? this.signatureMode,
+    autoTrackNextStop: autoTrackNextStop ?? this.autoTrackNextStop,
+    onShiftNotification: onShiftNotification ?? this.onShiftNotification,
+    breakReminderMinutes: breakReminderMinutes ?? this.breakReminderMinutes,
   );
 
   @override
@@ -316,9 +445,16 @@ class AppSettings {
       other.arrivalRadiusMeters == arrivalRadiusMeters &&
       other.showWeather == showWeather &&
       other.temperatureUnit == temperatureUnit &&
+      other.windUnit == windUnit &&
+      other.precipitationUnit == precipitationUnit &&
       other.dateStyle == dateStyle &&
       other.clockStyle == clockStyle &&
-      other.nfcClockOn == nfcClockOn;
+      other.nfcClockOn == nfcClockOn &&
+      other.defaultSort == defaultSort &&
+      other.signatureMode == signatureMode &&
+      other.autoTrackNextStop == autoTrackNextStop &&
+      other.onShiftNotification == onShiftNotification &&
+      other.breakReminderMinutes == breakReminderMinutes;
 
   @override
   int get hashCode => Object.hashAll([
@@ -339,8 +475,15 @@ class AppSettings {
     arrivalRadiusMeters,
     showWeather,
     temperatureUnit,
+    windUnit,
+    precipitationUnit,
     dateStyle,
     clockStyle,
     nfcClockOn,
+    defaultSort,
+    signatureMode,
+    autoTrackNextStop,
+    onShiftNotification,
+    breakReminderMinutes,
   ]);
 }

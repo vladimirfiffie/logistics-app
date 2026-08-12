@@ -68,6 +68,84 @@ class ReleaseNote {
 /// back into the last one.
 final releaseNotes = <ReleaseNote>[
   ReleaseNote(
+    version: '1.0.0-beta.5',
+    date: DateTime.utc(2026, 8, 12),
+    headline: 'Timesheets, breaks, exports and a route that plans itself.',
+    highlights: [
+      ReleaseChange(
+        'Your timesheet',
+        'Every shift you have worked, grouped by week, with breaks subtracted '
+            'so the total is what you are actually paid for. In Settings, '
+            'under Shift.',
+      ),
+      ReleaseChange(
+        'Take a break',
+        'One tap to pause the clock and one to start again. Rest, lunch or '
+            'other, and the app can nudge you if you have been going too '
+            'long.',
+      ),
+      ReleaseChange(
+        'Export your day',
+        'Stops and mileage as a spreadsheet, your recorded routes as GPX. '
+            'Both share straight out to wherever your expenses go.',
+      ),
+      ReleaseChange(
+        'A route that plans itself',
+        'Sort the run by best route and the app orders the remaining stops '
+            'nearest-first, telling you how much shorter it is. A suggestion '
+            '— your slots and the roads still win.',
+      ),
+      ReleaseChange(
+        'Sign at the door',
+        'Capture a signature alongside the photo. Off, optional or required, '
+            'whichever way your depot works.',
+      ),
+      ReleaseChange(
+        'Know you are on the clock',
+        'An ongoing notification for as long as your shift is running, so the '
+            'answer is in the shade rather than three taps away.',
+      ),
+    ],
+    fixes: [
+      ReleaseChange(
+        'Cleared history clears the photos',
+        'Clearing history left every proof photo and signature behind on the '
+            'phone, filling up storage with images of deliveries that no '
+            'longer exist.',
+      ),
+      ReleaseChange(
+        'Long shifts stay quick',
+        'The recorded trail was copied in full on every GPS fix, so a ten-hour '
+            'round got slower the longer you worked.',
+      ),
+      ReleaseChange(
+        'No repeat arrival alerts',
+        'If the app was killed mid-trip, coming back told you again about a '
+            'stop you had already reached.',
+      ),
+      ReleaseChange(
+        'Coming-up numbers are right',
+        'The list under "coming up" numbered from two, so every stop was '
+            'labelled as the one after it.',
+      ),
+      ReleaseChange(
+        'Arrival alerts admit when blocked',
+        'The switch stayed on after the notification permission was refused, '
+            'promising alerts that could never arrive.',
+      ),
+    ],
+    minor: [
+      'Search the run by reference, customer or street.',
+      'Pick your own units for temperature, wind and rain, and your own date '
+          'and time formats.',
+      'Start the next stop straight after closing one — as a button on the '
+          'summary, or automatically.',
+      'Settings is organised into sections and subsections rather than one '
+          'long list.',
+      'A clocked-off shift can no longer have its end time rewritten.',
+    ],
+  ),
+  ReleaseNote(
     version: '1.0.0-beta.4',
     date: DateTime.utc(2026, 8, 12),
     headline: 'The clock, the stop button, and units that are yours.',

@@ -8,6 +8,7 @@ import '../state/delivery_controller.dart';
 import '../state/settings_controller.dart';
 import 'delivery_detail_sheet.dart';
 import 'formatters.dart';
+import 'widgets/page_header.dart';
 import 'widgets/status_chip.dart';
 
 /// Closed-out stops and the distance recorded getting to them.
@@ -62,7 +63,7 @@ class _HistoryTabState extends State<HistoryTab> {
         slivers: [
           // No actions: "What's new" lives in Settings → About, which is the
           // one place a driver goes looking for it.
-          const SliverAppBar.large(title: Text('History')),
+          const PageHeaderBar('History'),
 
           SliverToBoxAdapter(
             child: Padding(
