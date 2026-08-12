@@ -113,29 +113,44 @@ and wire it into the `release` block per
 Losing this file means losing the ability to update the app on Play, so back
 it up somewhere that isn't this repo.
 
-## CI and releases
+## CI
 
-`.github/workflows/build.yml` runs on every push and PR: format check,
-`flutter analyze --fatal-infos`, `flutter test`, then a debug APK uploaded as
-an artifact. No secrets required.
+`.github/workflows/build.yml` runs on every push and PR, in two jobs:
 
-Pushing a `v*` tag additionally builds release APKs **split per ABI** and
-publishes them as a GitHub **prerelease**:
+- **analyze & test** — format check, `flutter analyze --fatal-infos`,
+  `flutter test`. No Android toolchain, so it fails in about a minute.
+- **split apks** — builds one APK per ABI and uploads them as a workflow
+  artifact. Gated behind the first job.
+
+Grab the APKs from the run's **Artifacts** section in the Actions tab.
+
+Pushing a `v*` tag adds a third job that publishes those same APKs as a
+GitHub **prerelease** (it reuses the artifact rather than rebuilding):
 
 ```sh
-git tag v1.0.0-beta.2
-git push origin v1.0.0-beta.2
+git tag v1.0.0-beta.1
+git push origin v1.0.0-beta.1
 ```
 
-Three files are attached — `arm64-v8a` (almost every phone since ~2017),
-`armeabi-v7a` (older 32-bit devices) and `x86_64` (emulators). Splitting
-avoids shipping all three architectures' native code to every device, which
-is most of the download for a Flutter app. Installing the wrong one fails
-with `INSTALL_FAILED_NO_MATCHING_ABIS`.
+Every tag is marked prerelease deliberately: while the APKs are debug-signed
+they are sideload-only, and calling that a stable release would be a lie.
+Wire up signing as described above before cutting anything stable. The job
+uses the built-in `GITHUB_TOKEN`, so there is nothing to configure.
 
-Every tag is marked prerelease deliberately: until a real upload keystore
-exists, those APKs are debug-signed and sideload-only. Wire up signing as
-described above before cutting anything that calls itself a stable release.
+Three files come out, named for the tag (or the short commit sha on branch
+builds):
 
-The release job uses the built-in `GITHUB_TOKEN`, so there is nothing to
-configure.
+| File | For |
+| --- | --- |
+| `arm64-v8a` | Almost every phone made since ~2017. **Start here.** |
+| `armeabi-v7a` | Older 32-bit devices. |
+| `x86_64` | Emulators and x86 Chromebooks. |
+
+Splitting avoids shipping all three architectures' native code to every
+device, which is most of the download for a Flutter app. Installing the wrong
+one fails with `INSTALL_FAILED_NO_MATCHING_ABIS` — that's the wrong file, not
+a broken build.
+
+These are release builds signed with the **debug** key, since no upload
+keystore exists yet. They sideload fine (`adb install <file>`) but cannot go
+to Google Play until signing is wired up as described above.
