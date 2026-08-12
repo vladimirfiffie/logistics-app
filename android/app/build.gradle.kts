@@ -6,7 +6,13 @@ plugins {
 
 android {
     namespace = "com.vlad.logistics_app"
-    compileSdk = flutter.compileSdkVersion
+    // Pinned above Flutter's default (36) because permission_handler_android
+    // is built against 37 and its AAR metadata refuses to link otherwise.
+    // compileSdk only controls which APIs are available at compile time; it
+    // does not opt the app into new runtime behaviour (targetSdk) or change
+    // which devices can install it (minSdk), both of which stay on Flutter's
+    // defaults below.
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
