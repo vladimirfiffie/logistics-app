@@ -126,24 +126,32 @@ Grab the APKs from the run's **Artifacts** section in the Actions tab.
 
 ### Releases
 
-`.github/workflows/release.yml` is separate and only runs for releases. It
-builds split **and** universal APKs, then publishes them to GitHub Releases.
-Two ways to trigger it:
+`.github/workflows/release.yml` builds split **and** universal APKs and
+publishes them to GitHub Releases. Three ways in, all ending in the same
+place:
 
-**From the Actions tab — no git credentials needed.** Open the **Release**
-workflow → **Run workflow** → enter a version in `tag`. The tag is created
-server-side, so this works even if you can't push tags from your machine.
+**1. Bump the version and push to main — the usual route.** Edit `version:` in
+`pubspec.yaml`, add a matching `lib/release_notes.dart` entry, push. If no
+release exists for that version yet, one is cut. Needs no tag push, so it
+works without git credentials.
 
-**Or by pushing a tag:**
+**2. From the Actions tab.** **Release** → **Run workflow** → enter a version
+in `tag`. Also credential-free; the tag is created server-side.
+
+**3. By pushing a tag:**
 
 ```sh
-git tag v1.0.0-beta.1
-git push origin v1.0.0-beta.1
+git tag v1.0.0-beta.1 && git push origin v1.0.0-beta.1
 ```
 
 Note `git push` alone never sends tags — you have to name the tag (or pass
-`--tags`). That is the usual reason a release "doesn't happen": the branch
-went up, the tag didn't, and a branch push is not a release trigger.
+`--tags`). That is the usual reason a tag-triggered release "doesn't happen":
+the branch went up and the tag didn't.
+
+A cheap `decide` job runs first and works out whether there is anything to
+publish, so an ordinary push that didn't touch the version costs ten seconds
+rather than a six-minute Gradle build. If the version is already released it
+logs a notice saying so and stops.
 
 **A hyphen in the tag makes it a prerelease.** `v1.0.0-beta.1` is a
 prerelease; `v1.0.0` is a full release and gets GitHub's "Latest" badge. This
