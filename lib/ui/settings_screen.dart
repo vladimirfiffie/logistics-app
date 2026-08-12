@@ -7,11 +7,13 @@ import '../data/seed_data.dart';
 import '../models/app_settings.dart';
 import '../release_notes.dart';
 import '../services/app_haptics.dart';
+import '../services/app_preferences.dart';
 import '../services/location_service.dart';
 import '../services/notification_service.dart';
 import '../state/delivery_controller.dart';
 import '../state/settings_controller.dart';
 import '../state/tracking_controller.dart';
+import 'onboarding_screen.dart';
 import 'whats_new_sheet.dart';
 import 'widgets/app_sheet.dart';
 
@@ -302,6 +304,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: () => WhatsNewSheet.show(context, currentRelease),
           ),
           ListTile(
+            leading: const Icon(Icons.restart_alt),
+            title: const Text('Replay the introduction'),
+            subtitle: const Text('Go through the first-run walkthrough again.'),
+            onTap: _replayOnboarding,
+          ),
+          ListTile(
             leading: const Icon(Icons.description_outlined),
             title: const Text('Open source licences'),
             onTap: () => showLicensePage(
@@ -390,6 +398,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text('New day seeded.')));
+  }
+
+  /// Shows the walkthrough again on demand.
+  ///
+  /// Nothing is deleted — it is a re-read, not a factory reset, so the flag is
+  /// cleared and immediately set again around the replay. If the driver backs
+  /// out halfway, the next launch does not ambush them with it.
+  Future<void> _replayOnboarding() async {
+    const preferences = AppPreferences();
+    await preferences.setOnboardingComplete(false);
+    if (!mounted) return;
+
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (routeContext) => OnboardingScreen(
+          onEnable: () async {
+            await context.read<LocationService>().ensureReady();
+            if (routeContext.mounted) Navigator.of(routeContext).pop();
+          },
+          onSkip: () => Navigator.of(routeContext).pop(),
+        ),
+      ),
+    );
+
+    await preferences.setOnboardingComplete(true);
+    if (mounted) await _refreshPermissions();
   }
 
   Future<bool> _confirmDestructive({

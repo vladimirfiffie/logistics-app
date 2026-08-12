@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:haptic_kit/haptic_kit.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../models/app_settings.dart';
 import '../models/delivery.dart';
 import '../services/app_haptics.dart';
 import '../services/location_service.dart';
@@ -31,6 +32,8 @@ class _LiveTabState extends State<LiveTab> {
   /// The elapsed clock has to tick even when no new fix has arrived, so it
   /// gets its own timer rather than riding on position updates.
   Timer? _clock;
+
+  /// Seeded from the driver's default in initState rather than hardcoded.
   bool _followDriver = true;
   bool _backgroundPermissionGranted = true;
   int _seenFixes = 0;
@@ -51,6 +54,9 @@ class _LiveTabState extends State<LiveTab> {
         setState(() {});
       }
     });
+    _followDriver =
+        context.read<SettingsController>().settings.followMode ==
+        MapFollowMode.follow;
     _checkBackgroundPermission();
     _tracking = context.read<TrackingController>()..addListener(_onTracking);
   }

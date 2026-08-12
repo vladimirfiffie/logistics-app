@@ -38,13 +38,27 @@ class _StartupGateState extends State<StartupGate> {
   }
 
   Future<void> _boot() async {
+    const preferences = AppPreferences();
+    final seenOnboarding = await preferences.onboardingComplete();
+
+    if (!mounted) return;
     final deliveries = context.read<DeliveryController>();
     await deliveries.load();
     if (!mounted) return;
 
-    if (deliveries.deliveries.isEmpty) {
+    if (!seenOnboarding) {
       setState(() => _stage = _Stage.onboarding);
       return;
+    }
+
+    // Onboarding is done but the manifest is empty — the driver cleared it
+    // from Settings, or a seed was interrupted. Refill quietly rather than
+    // dropping them onto an empty app or replaying the intro.
+    if (deliveries.deliveries.isEmpty) {
+      await _seed(withLocation: true);
+      if (!mounted) return;
+      await deliveries.load();
+      if (!mounted) return;
     }
 
     await context.read<TrackingController>().restore();
@@ -81,10 +95,36 @@ class _StartupGateState extends State<StartupGate> {
   Future<void> _seedAndEnter({required bool withLocation}) async {
     setState(() => _isBusy = true);
 
-    final repository = context.read<DeliveryRepository>();
-    final location = context.read<LocationService>();
     final deliveries = context.read<DeliveryController>();
     final tracking = context.read<TrackingController>();
+
+    await _seed(withLocation: withLocation);
+    // Recorded only once the flow is actually finished, so a driver who kills
+    // the app halfway through sees it again rather than losing it for good.
+    await const AppPreferences().setOnboardingComplete(true);
+
+    if (!mounted) return;
+    await deliveries.load();
+    if (!mounted) return;
+    await tracking.restore();
+
+    if (mounted) {
+      setState(() {
+        _isBusy = false;
+        _stage = _Stage.ready;
+      });
+      // Records the version without showing the sheet — see
+      // shouldShowWhatsNew.
+      await _maybeShowWhatsNew(isFreshInstall: true);
+    }
+  }
+
+  /// Fills an empty manifest. With location granted the stops are placed
+  /// around wherever the driver actually is; otherwise they fall back to a
+  /// fixed city centre. No-ops when deliveries already exist.
+  Future<void> _seed({required bool withLocation}) async {
+    final repository = context.read<DeliveryRepository>();
+    final location = context.read<LocationService>();
 
     LatLng? origin;
     if (withLocation) {
@@ -102,18 +142,6 @@ class _StartupGateState extends State<StartupGate> {
     }
 
     await SeedData.ensureSeeded(repository, origin: origin);
-    await deliveries.load();
-    await tracking.restore();
-
-    if (mounted) {
-      setState(() {
-        _isBusy = false;
-        _stage = _Stage.ready;
-      });
-      // Records the version without showing the sheet — see
-      // shouldShowWhatsNew.
-      await _maybeShowWhatsNew(isFreshInstall: true);
-    }
   }
 
   @override

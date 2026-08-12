@@ -45,6 +45,15 @@ seeds a starter manifest of six stops scattered a few kilometres around
 wherever you are. Decline location and it seeds around a fallback origin
 instead. The seed only ever runs against an empty database.
 
+Need a bigger round to work with? **Manifest → the road icon → Add stops**
+generates 5, 10 or 25 more around you, with references continuing from the
+highest already on the manifest. It stands in for the dispatch backend that
+does not exist yet.
+
+**Settings → Replay the introduction** runs the walkthrough again. Onboarding
+is tracked by its own flag rather than "are there any deliveries", so clearing
+the manifest does not replay it.
+
 ## Layout
 
 ```
@@ -71,12 +80,18 @@ Two seams are worth knowing about:
 flutter test
 ```
 
-48 tests covering the SQLite repository (against in-memory SQLite via
-`sqflite_common_ffi`), both controllers against fakes, the seeding rules, the
-model serialisation, and the display formatters. The tracking tests cover the
-things that are easy to get wrong: the odometer excluding low-accuracy fixes,
-a failed write not tearing down a live trip, and a trip left open by a killed
-process being picked back up on launch.
+90 tests covering the SQLite repository (against in-memory SQLite via
+`sqflite_common_ffi`), the controllers against fakes, settings persistence,
+unit formatting, weather parsing, the seeding rules, model serialisation and
+the release-notes/pubspec version pact.
+
+The ones worth knowing about pin down behaviour that is easy to get subtly
+wrong: the odometer excluding low-accuracy fixes so a bad reading cannot
+invent a kilometre, a failed breadcrumb write not tearing down a live trip, a
+trip left open by a killed process being picked back up on launch, unknown
+stored enum values falling back instead of throwing on startup, and the
+weather parser degrading to "no card" on a captive-portal HTML response
+rather than an error the driver has to dismiss.
 
 ## Android permissions
 

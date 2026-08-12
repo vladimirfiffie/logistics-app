@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:math' show Random;
 
 import 'package:latlong2/latlong.dart';
 import 'package:uuid/uuid.dart';
@@ -120,6 +121,141 @@ class SeedData {
         ),
       );
     }
+  }
+
+  static const _customers = [
+    'Harlow & Sons Hardware',
+    'Meridian Dental Practice',
+    'Castellan Coffee Roasters',
+    'Redmond Autoparts',
+    'St Aldate Primary School',
+    'Beckworth Veterinary Clinic',
+    'The Fold Bookshop',
+    'Ravensmere Garden Centre',
+    'Poulton Tyre & Exhaust',
+    'Alderway Pharmacy',
+    'Kestrel Print Works',
+    'Marchetti Delicatessen',
+    'Quillon Legal Services',
+    'Ferrymead Community Hall',
+    'Bramley Bakery',
+    'Northgate Physiotherapy',
+    'Ashcombe Electrical Supplies',
+    'The Lantern Guest House',
+  ];
+
+  static const _residents = [
+    'Nadia Okonkwo',
+    'Tomasz Wiśniewski',
+    'Priya Raghunathan',
+    'Callum Sutherland',
+    'Amara Nwosu',
+    'Léa Bertrand',
+    'Hyun-woo Park',
+    'Sofia Marchetti',
+  ];
+
+  static const _streets = [
+    'Bridgewater Road',
+    'Oakfield Avenue',
+    'Selby Street',
+    'Kilnbrook Estate',
+    'Vindale Yard',
+    'Perrin House',
+    'Marlow Crescent',
+    'Tanners Lane',
+    'Halstead Way',
+    'Cobb Street',
+    'Ferrymead Road',
+    'Whitlock Rise',
+  ];
+
+  static const _notes = [
+    'Loading bay round the back.',
+    'Buzzer broken — call on arrival.',
+    'Leave with the neighbour if out.',
+    'Heavy — trolley recommended.',
+    'Access via the side gate.',
+    'Closed 13:00–14:00 for lunch.',
+    'Deliveries before 15:00 only.',
+    null,
+    null,
+  ];
+
+  /// Appends [count] freshly generated stops to whatever is already there.
+  ///
+  /// Exists because there is no dispatch backend to pull a real day's work
+  /// from — this is how you get more to test against. References continue
+  /// from the highest existing one so they never collide, and the stops are
+  /// scattered around [origin] like the initial seed.
+  static Future<List<Delivery>> addStops(
+    DeliveryRepository repository, {
+    int count = 5,
+    LatLng? origin,
+    DateTime? now,
+    Uuid uuid = const Uuid(),
+    Random? random,
+  }) async {
+    final rng = random ?? Random();
+    final existing = await repository.fetchDeliveries();
+    final start = origin ?? fallbackOrigin;
+    final today = now ?? DateTime.now();
+
+    // Continue the numbering rather than restarting it.
+    var nextNumber = 1040;
+    for (final delivery in existing) {
+      final digits = RegExp(r'(\d+)$').firstMatch(delivery.reference)?.group(1);
+      final parsed = int.tryParse(digits ?? '');
+      if (parsed != null && parsed >= nextNumber) nextNumber = parsed + 1;
+    }
+
+    // Queue new work after the latest slot already on the manifest, so added
+    // stops sort to the end instead of interleaving with the day's history.
+    var slot = DateTime(today.year, today.month, today.day, 9);
+    for (final delivery in existing) {
+      if (delivery.scheduledFor.isAfter(slot)) slot = delivery.scheduledFor;
+    }
+
+    final created = <Delivery>[];
+    for (var i = 0; i < count; i++) {
+      // A quarter residential, which is roughly a real round's mix and gives
+      // the flat/buzzer notes somewhere to land.
+      final residential = rng.nextInt(4) == 0;
+      final customer = residential
+          ? _residents[rng.nextInt(_residents.length)]
+          : _customers[rng.nextInt(_customers.length)];
+      final street = _streets[rng.nextInt(_streets.length)];
+      final address = residential
+          ? 'Flat ${rng.nextInt(40) + 1}, $street'
+          : '${rng.nextInt(200) + 1} $street';
+
+      final point = _offset(
+        start,
+        // Signed offsets out to ~5km, so stops land all around the driver
+        // rather than in one quadrant.
+        northKm: (rng.nextDouble() * 10) - 5,
+        eastKm: (rng.nextDouble() * 10) - 5,
+      );
+
+      slot = slot.add(Duration(minutes: 20 + rng.nextInt(40)));
+
+      final delivery = Delivery(
+        id: uuid.v4(),
+        reference: 'LG-${nextNumber + i}',
+        customerName: customer,
+        address: address,
+        latitude: point.latitude,
+        longitude: point.longitude,
+        status: DeliveryStatus.pending,
+        scheduledFor: slot,
+        notes: _notes[rng.nextInt(_notes.length)],
+        parcelCount: residential ? 1 : rng.nextInt(8) + 1,
+      );
+      await repository.saveDelivery(delivery);
+      created.add(delivery);
+    }
+
+    return created;
   }
 
   /// Shifts [from] by a ground distance in kilometres. Accurate enough over the

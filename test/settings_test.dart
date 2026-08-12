@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:logistics_app/models/app_settings.dart';
 import 'package:logistics_app/services/app_haptics.dart';
+import 'package:logistics_app/services/app_preferences.dart';
 import 'package:logistics_app/state/settings_controller.dart';
 import 'package:logistics_app/ui/formatters.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -94,6 +95,77 @@ void main() {
       final reloaded = SettingsController();
       await reloaded.load();
       expect(reloaded.settings, const AppSettings());
+    });
+  });
+
+  group('onboarding flag', () {
+    test('a fresh install has not seen onboarding', () async {
+      expect(await const AppPreferences().onboardingComplete(), isFalse);
+    });
+
+    test('survives being set, and can be reset to replay the intro', () async {
+      const preferences = AppPreferences();
+
+      await preferences.setOnboardingComplete(true);
+      expect(await preferences.onboardingComplete(), isTrue);
+
+      // "Replay the introduction" clears it, shows the flow, then sets it
+      // again — a driver who backs out halfway is not ambushed next launch.
+      await preferences.setOnboardingComplete(false);
+      expect(await preferences.onboardingComplete(), isFalse);
+
+      await preferences.setOnboardingComplete(true);
+      expect(await preferences.onboardingComplete(), isTrue);
+    });
+
+    test('is independent of the seen-version marker', () async {
+      const preferences = AppPreferences();
+      await preferences.setOnboardingComplete(true);
+      await preferences.setLastSeenVersion('9.9.9');
+
+      await preferences.setOnboardingComplete(false);
+
+      // Replaying the intro must not also re-trigger the changelog.
+      expect(await preferences.lastSeenVersion(), '9.9.9');
+    });
+  });
+
+  group('new preferences', () {
+    test('driver details and weather round-trip', () async {
+      final first = SettingsController();
+      await first.load();
+      await first.setDriverName('  Vlad  ');
+      await first.setVehicleLabel('LT21 KXR');
+      await first.setShowWeather(false);
+      await first.setArrivalRadius(300);
+      await first.setAccent(AccentColor.hiVis);
+      await first.setAmoled(true);
+
+      final second = SettingsController();
+      await second.load();
+
+      // Names are trimmed on the way in, so the greeting cannot render with
+      // stray whitespace.
+      expect(second.settings.driverName, 'Vlad');
+      expect(second.settings.vehicleLabel, 'LT21 KXR');
+      expect(second.settings.showWeather, isFalse);
+      expect(second.settings.arrivalRadiusMeters, 300);
+      expect(second.settings.accent, AccentColor.hiVis);
+      expect(second.settings.amoled, isTrue);
+    });
+
+    test('reset clears the newer keys too', () async {
+      final controller = SettingsController();
+      await controller.load();
+      await controller.setDriverName('Vlad');
+      await controller.setAmoled(true);
+      await controller.setShowWeather(false);
+
+      await controller.resetToDefaults();
+
+      expect(controller.settings, const AppSettings());
+      expect(controller.settings.driverName, isEmpty);
+      expect(controller.settings.showWeather, isTrue);
     });
   });
 

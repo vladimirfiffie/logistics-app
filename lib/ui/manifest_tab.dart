@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
+import '../data/delivery_repository.dart';
+import '../data/seed_data.dart';
 import '../models/delivery.dart';
 import '../services/app_haptics.dart';
 import '../services/location_service.dart';
 import '../state/delivery_controller.dart';
 import 'delivery_detail_sheet.dart';
 import 'settings_screen.dart';
+import 'widgets/app_sheet.dart';
 import 'widgets/delivery_card.dart';
 
 enum _SortMode {
@@ -78,6 +82,66 @@ class _ManifestTabState extends State<ManifestTab> {
     return list;
   }
 
+  /// Generates extra work to test against.
+  ///
+  /// Stands in for a dispatch backend: without one there is no way to get a
+  /// bigger round than the six stops the first run seeds.
+  Future<void> _addStops() async {
+    final count = await showAppSheet<int>(
+      context,
+      builder: (sheetContext) => Padding(
+        padding: const EdgeInsets.fromLTRB(8, 0, 8, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: SheetHeader(
+                title: 'Add stops',
+                subtitle:
+                    'Generates extra deliveries around you. There is no '
+                    'dispatch backend yet, so this is how you get a bigger '
+                    'round to work with.',
+                icon: Icons.add_road,
+              ),
+            ),
+            for (final option in const [5, 10, 25])
+              ListTile(
+                leading: const Icon(Icons.local_shipping_outlined),
+                title: Text('Add $option stops'),
+                onTap: () => Navigator.of(sheetContext).pop(option),
+              ),
+          ],
+        ),
+      ),
+    );
+
+    if (count == null || !mounted) return;
+
+    final repository = context.read<DeliveryRepository>();
+    final deliveries = context.read<DeliveryController>();
+    final fix = _fix;
+
+    final created = await SeedData.addStops(
+      repository,
+      count: count,
+      origin: fix == null ? null : LatLng(fix.latitude, fix.longitude),
+    );
+    await deliveries.refresh();
+    await AppHaptics.delivered();
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Added ${created.length} stops '
+          '(${created.first.reference}–${created.last.reference}).',
+        ),
+      ),
+    );
+  }
+
   Future<void> _open(Delivery delivery) async {
     final startedTracking = await showDeliveryDetail(context, delivery.id);
     if (startedTracking ?? false) widget.onTrackingStarted();
@@ -97,6 +161,11 @@ class _ManifestTabState extends State<ManifestTab> {
           SliverAppBar.large(
             title: const Text("Today's run"),
             actions: [
+              IconButton(
+                onPressed: _addStops,
+                icon: const Icon(Icons.add_road),
+                tooltip: 'Add more stops',
+              ),
               IconButton(
                 onPressed: () => SettingsScreen.show(context),
                 icon: const Icon(Icons.settings_outlined),

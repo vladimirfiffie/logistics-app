@@ -5,6 +5,22 @@ class AppPreferences {
   const AppPreferences();
 
   static const _lastSeenVersionKey = 'last_seen_release_version';
+  static const _onboardingCompleteKey = 'onboarding_complete';
+
+  /// Whether the driver has been through the first-run flow.
+  ///
+  /// Kept as its own flag rather than inferred from "are there any
+  /// deliveries", which would wrongly replay onboarding after the manifest is
+  /// cleared from Settings.
+  Future<bool> onboardingComplete() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_onboardingCompleteKey) ?? false;
+  }
+
+  Future<void> setOnboardingComplete(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_onboardingCompleteKey, value);
+  }
 
   /// The release whose "What's new" sheet the driver has already been shown.
   /// Null on a fresh install.
