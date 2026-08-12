@@ -14,20 +14,31 @@ import '../state/delivery_controller.dart';
 import '../state/tracking_controller.dart';
 import 'delivery_actions.dart';
 import 'formatters.dart';
+import 'widgets/app_sheet.dart';
 import 'widgets/status_chip.dart';
 import 'widgets/trip_map.dart';
 
 /// Everything about one stop, plus the actions that move it forward.
-class DeliveryDetailScreen extends StatefulWidget {
-  const DeliveryDetailScreen({super.key, required this.deliveryId});
+///
+/// Resolves to true when the driver started tracking from here, so the shell
+/// can jump to the live view.
+Future<bool?> showDeliveryDetail(BuildContext context, String deliveryId) {
+  return showAppSheet<bool>(
+    context,
+    builder: (_) => DeliveryDetailSheet(deliveryId: deliveryId),
+  );
+}
+
+class DeliveryDetailSheet extends StatefulWidget {
+  const DeliveryDetailSheet({super.key, required this.deliveryId});
 
   final String deliveryId;
 
   @override
-  State<DeliveryDetailScreen> createState() => _DeliveryDetailScreenState();
+  State<DeliveryDetailSheet> createState() => _DeliveryDetailSheetState();
 }
 
-class _DeliveryDetailScreenState extends State<DeliveryDetailScreen> {
+class _DeliveryDetailSheetState extends State<DeliveryDetailSheet> {
   Trip? _trip;
 
   @override
@@ -50,82 +61,97 @@ class _DeliveryDetailScreenState extends State<DeliveryDetailScreen> {
     );
 
     if (delivery == null) {
-      return Scaffold(
-        appBar: AppBar(),
-        body: const Center(child: Text('This stop is no longer on the run.')),
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(24, 0, 24, 40),
+        child: Text('This stop is no longer on the run.'),
       );
     }
 
     final theme = Theme.of(context);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(delivery.reference),
-        actions: [StatusChip(delivery.status), const SizedBox(width: 12)],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.only(bottom: 24),
-        children: [
-          SizedBox(
-            height: 200,
-            child: TripMap(
-              destination: LatLng(delivery.latitude, delivery.longitude),
-              followDriver: false,
-              interactive: false,
-            ),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 0),
+          child: SheetHeader(
+            title: delivery.customerName,
+            subtitle: delivery.reference,
+            trailing: StatusChip(delivery.status),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  delivery.customerName,
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
+        ),
+        const SizedBox(height: 14),
+        Flexible(
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.only(bottom: 24),
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: SizedBox(
+                    height: 170,
+                    // Non-interactive so dragging over the map scrolls the
+                    // sheet instead of panning the map underneath it.
+                    child: TripMap(
+                      destination: LatLng(
+                        delivery.latitude,
+                        delivery.longitude,
+                      ),
+                      followDriver: false,
+                      interactive: false,
+                    ),
                   ),
                 ),
-                const SizedBox(height: 6),
-                Text(delivery.address, style: theme.textTheme.bodyLarge),
-                const SizedBox(height: 20),
-                _InfoRow(
-                  icon: Icons.schedule,
-                  label: 'Scheduled',
-                  value: formatDateTime(delivery.scheduledFor),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 18, 24, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(delivery.address, style: theme.textTheme.bodyLarge),
+                    const SizedBox(height: 16),
+                    _InfoRow(
+                      icon: Icons.schedule,
+                      label: 'Scheduled',
+                      value: formatDateTime(delivery.scheduledFor),
+                    ),
+                    _InfoRow(
+                      icon: Icons.inventory_2_outlined,
+                      label: 'Parcels',
+                      value: '${delivery.parcelCount}',
+                    ),
+                    _InfoRow(
+                      icon: Icons.my_location,
+                      label: 'Coordinates',
+                      value: formatCoordinates(
+                        delivery.latitude,
+                        delivery.longitude,
+                      ),
+                      onCopy: () => _copyCoordinates(delivery),
+                    ),
+                    if (delivery.notes case final String notes) ...[
+                      const SizedBox(height: 10),
+                      _NotesCard(notes: notes),
+                    ],
+                    if (_trip case final Trip trip) ...[
+                      const SizedBox(height: 10),
+                      _TripSummary(trip: trip),
+                    ],
+                    if (!delivery.status.isOpen) ...[
+                      const SizedBox(height: 10),
+                      _OutcomeCard(delivery: delivery),
+                    ],
+                    const SizedBox(height: 22),
+                    ..._buildActions(context, delivery),
+                  ],
                 ),
-                _InfoRow(
-                  icon: Icons.inventory_2_outlined,
-                  label: 'Parcels',
-                  value: '${delivery.parcelCount}',
-                ),
-                _InfoRow(
-                  icon: Icons.my_location,
-                  label: 'Coordinates',
-                  value: formatCoordinates(
-                    delivery.latitude,
-                    delivery.longitude,
-                  ),
-                  onCopy: () => _copyCoordinates(delivery),
-                ),
-                if (delivery.notes case final String notes) ...[
-                  const SizedBox(height: 8),
-                  _NotesCard(notes: notes),
-                ],
-                if (_trip case final Trip trip) ...[
-                  const SizedBox(height: 8),
-                  _TripSummary(trip: trip),
-                ],
-                if (!delivery.status.isOpen) ...[
-                  const SizedBox(height: 8),
-                  _OutcomeCard(delivery: delivery),
-                ],
-                const SizedBox(height: 24),
-                ..._buildActions(context, delivery),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -226,13 +252,24 @@ class _DeliveryDetailScreenState extends State<DeliveryDetailScreen> {
   }
 
   Future<void> _complete(Delivery delivery) async {
-    await completeDelivery(context, delivery);
-    if (mounted) await _loadTrip();
+    final navigator = Navigator.of(context);
+    final closed = await completeDelivery(context, delivery);
+    // The stop is done; leaving its detail sheet open serves no purpose.
+    if (closed && navigator.canPop()) {
+      navigator.pop();
+    } else if (mounted) {
+      await _loadTrip();
+    }
   }
 
   Future<void> _fail(Delivery delivery) async {
-    await failDelivery(context, delivery);
-    if (mounted) await _loadTrip();
+    final navigator = Navigator.of(context);
+    final closed = await failDelivery(context, delivery);
+    if (closed && navigator.canPop()) {
+      navigator.pop();
+    } else if (mounted) {
+      await _loadTrip();
+    }
   }
 
   Future<void> _copyCoordinates(Delivery delivery) async {
@@ -406,6 +443,9 @@ class _OutcomeCard extends StatelessWidget {
     final theme = Theme.of(context);
     final failed = delivery.status == DeliveryStatus.failed;
     final scheme = theme.colorScheme;
+    final foreground = failed
+        ? scheme.onErrorContainer
+        : scheme.onTertiaryContainer;
 
     return Card(
       margin: EdgeInsets.zero,
@@ -420,31 +460,16 @@ class _OutcomeCard extends StatelessWidget {
               failed ? 'Not delivered' : 'Delivered',
               style: theme.textTheme.labelLarge?.copyWith(
                 fontWeight: FontWeight.w700,
-                color: failed
-                    ? scheme.onErrorContainer
-                    : scheme.onTertiaryContainer,
+                color: foreground,
               ),
             ),
             const SizedBox(height: 6),
             if (delivery.completedAt case final DateTime at)
-              Text(
-                formatDateTime(at),
-                style: TextStyle(
-                  color: failed
-                      ? scheme.onErrorContainer
-                      : scheme.onTertiaryContainer,
-                ),
-              ),
+              Text(formatDateTime(at), style: TextStyle(color: foreground)),
             if (delivery.recipientName case final String name)
-              Text(
-                'Received by $name',
-                style: TextStyle(color: scheme.onTertiaryContainer),
-              ),
+              Text('Received by $name', style: TextStyle(color: foreground)),
             if (delivery.failureReason case final String reason)
-              Text(
-                'Reason: $reason',
-                style: TextStyle(color: scheme.onErrorContainer),
-              ),
+              Text('Reason: $reason', style: TextStyle(color: foreground)),
             if (delivery.proofPhotoPath case final String path) ...[
               const SizedBox(height: 10),
               ClipRRect(
@@ -454,8 +479,10 @@ class _OutcomeCard extends StatelessWidget {
                   height: 160,
                   width: double.infinity,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) =>
-                      const Text('Proof photo is no longer on this device.'),
+                  errorBuilder: (_, _, _) => Text(
+                    'Proof photo is no longer on this device.',
+                    style: TextStyle(color: foreground),
+                  ),
                 ),
               ),
             ],

@@ -1,0 +1,131 @@
+name: Release
+
+# Push a tag to cut a build:
+#   git tag v1.0.0-beta.1 && git push origin v1.0.0-beta.1
+# Tags containing a hyphen (v1.0.0-beta.1) are treated as prereleases; a plain
+# vX.Y.Z is a full release.
+#
+# Or run it manually from the Actions tab and fill in "tag" — that path needs
+# no git credentials, because the tag is created server-side.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Version label for a manual build (e.g. v1.0.0-beta.1)'
+        required: true
+        default: 'v0.0.0-manual'
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    name: Build & publish Android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # AGP supports only a trailing window of JDK releases, and a runner
+          # image bumping its default JDK should not break the build.
+          java-version: '21'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.8
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --fatal-infos
+
+      - name: Test
+        run: flutter test
+
+      - name: Resolve version label
+        id: version
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="$GITHUB_REF_NAME"
+          fi
+
+          # Only hyphenated tags (v1.0.0-beta.1) are prereleases. A plain
+          # vX.Y.Z is a full release, so GitHub gives it the "Latest" badge —
+          # marking everything prerelease leaves /releases/latest a 404 and
+          # the releases page looking like a bare list of tags.
+          case "$TAG" in
+            *-*) PRE=true  ;;
+            *)   PRE=false ;;
+          esac
+
+          echo "tag=${TAG}"        >> "$GITHUB_OUTPUT"
+          echo "prerelease=${PRE}" >> "$GITHUB_OUTPUT"
+          echo "Publishing ${TAG} as prerelease=${PRE}"
+
+      # Debug-signed: this is a test build, not a Play Store artifact.
+      # Installing it requires "install from unknown sources".
+      # See README > Signing.
+      - name: Build release APKs (split per ABI)
+        run: flutter build apk --release --split-per-abi
+
+      # Also shipped because a split APK is useless to anyone who does not
+      # know their device's ABI; the universal one always works, at roughly
+      # triple the native-code size.
+      - name: Build universal APK
+        run: flutter build apk --release
+
+      - name: Rename artifacts
+        run: |
+          mkdir -p dist
+          V="${{ steps.version.outputs.tag }}"
+          cp build/app/outputs/flutter-apk/app-release.apk \
+             "dist/logistics-${V}-universal.apk"
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            src="build/app/outputs/flutter-apk/app-${abi}-release.apk"
+            # Fail loudly rather than publishing a set that looks complete
+            # until someone needs the missing architecture.
+            test -f "$src" || { echo "::error::missing $src"; exit 1; }
+            cp "$src" "dist/logistics-${V}-${abi}.apk"
+          done
+          ls -lh dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: logistics-apks
+          path: dist/*.apk
+          if-no-files-found: error
+
+      # Same copy as the in-app "What's new" sheet, generated from
+      # lib/release_notes.dart so the two cannot drift.
+      - name: Generate release notes
+        run: |
+          dart run tool/generate_release_notes.dart \
+            "${{ steps.version.outputs.tag }}" > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+
+      # No `if:` on the ref here on purpose. Gating this on
+      # startsWith(github.ref, 'refs/tags/v') would mean a manual run builds
+      # everything and then silently skips publishing, since github.ref is
+      # refs/heads/main on a workflow_dispatch. tag_name + target_commitish
+      # make the manual path create the tag server-side instead.
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Logistics ${{ steps.version.outputs.tag }}
+          prerelease: ${{ steps.version.outputs.prerelease }}
+          make_latest: ${{ steps.version.outputs.prerelease == 'false' }}
+          # Appends the auto-generated commit/PR list below our own copy.
+          generate_release_notes: true
+          files: dist/*.apk
+          body_path: RELEASE_NOTES.md

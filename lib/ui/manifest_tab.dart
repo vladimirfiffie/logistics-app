@@ -5,7 +5,7 @@ import 'package:provider/provider.dart';
 import '../models/delivery.dart';
 import '../services/location_service.dart';
 import '../state/delivery_controller.dart';
-import 'delivery_detail_screen.dart';
+import 'delivery_detail_sheet.dart';
 import 'widgets/delivery_card.dart';
 
 enum _SortMode {
@@ -77,11 +77,7 @@ class _ManifestTabState extends State<ManifestTab> {
   }
 
   Future<void> _open(Delivery delivery) async {
-    final startedTracking = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => DeliveryDetailScreen(deliveryId: delivery.id),
-      ),
-    );
+    final startedTracking = await showDeliveryDetail(context, delivery.id);
     if (startedTracking ?? false) widget.onTrackingStarted();
   }
 

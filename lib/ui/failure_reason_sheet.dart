@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
+import 'widgets/app_sheet.dart';
+
 /// Asks why a stop could not be completed.
 ///
 /// The presets are the reasons that actually recur on a round; "Other" opens a
 /// free-text field so nothing gets forced into the wrong bucket.
-class FailureReasonDialog extends StatefulWidget {
-  const FailureReasonDialog({super.key});
+class FailureReasonSheet extends StatefulWidget {
+  const FailureReasonSheet({super.key});
 
   static const presets = <String>[
     'Nobody home',
@@ -17,16 +19,14 @@ class FailureReasonDialog extends StatefulWidget {
   ];
 
   /// Returns the chosen reason, or null if dismissed.
-  static Future<String?> show(BuildContext context) => showDialog<String>(
-    context: context,
-    builder: (_) => const FailureReasonDialog(),
-  );
+  static Future<String?> show(BuildContext context) =>
+      showAppSheet<String>(context, builder: (_) => const FailureReasonSheet());
 
   @override
-  State<FailureReasonDialog> createState() => _FailureReasonDialogState();
+  State<FailureReasonSheet> createState() => _FailureReasonSheetState();
 }
 
-class _FailureReasonDialogState extends State<FailureReasonDialog> {
+class _FailureReasonSheetState extends State<FailureReasonSheet> {
   String? _selected;
   final _otherController = TextEditingController();
 
@@ -48,18 +48,26 @@ class _FailureReasonDialogState extends State<FailureReasonDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text("Couldn't deliver"),
-      content: SingleChildScrollView(
+    final insets = MediaQuery.viewInsetsOf(context).bottom;
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(24, 0, 24, 20 + insets),
+      child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            const SheetHeader(
+              title: "Couldn't deliver",
+              subtitle: 'Pick the closest reason.',
+              icon: Icons.report_gmailerrorred_outlined,
+            ),
+            const SizedBox(height: 18),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (final reason in [...FailureReasonDialog.presets, 'Other'])
+                for (final reason in [...FailureReasonSheet.presets, 'Other'])
                   ChoiceChip(
                     label: Text(reason),
                     selected: _selected == reason,
@@ -68,7 +76,7 @@ class _FailureReasonDialogState extends State<FailureReasonDialog> {
               ],
             ),
             if (_isOther) ...[
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
               TextField(
                 controller: _otherController,
                 autofocus: true,
@@ -81,21 +89,23 @@ class _FailureReasonDialogState extends State<FailureReasonDialog> {
                 onChanged: (_) => setState(() {}),
               ),
             ],
+            const SizedBox(height: 22),
+            FilledButton(
+              onPressed: _result == null
+                  ? null
+                  : () => Navigator.of(context).pop(_result),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+              ),
+              child: const Text('Record'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
           ],
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: _result == null
-              ? null
-              : () => Navigator.of(context).pop(_result),
-          child: const Text('Record'),
-        ),
-      ],
     );
   }
 }

@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../models/delivery.dart';
+import 'widgets/app_sheet.dart';
 
 /// What the driver captured when closing out a stop.
 typedef ProofOfDelivery = ({String? recipientName, String? photoPath});
@@ -22,10 +23,10 @@ class CompleteDeliverySheet extends StatefulWidget {
     BuildContext context,
     Delivery delivery,
   ) {
-    return showModalBottomSheet<ProofOfDelivery>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
+    return showAppSheet<ProofOfDelivery>(
+      context,
+      // A swipe-away here would discard a captured photo and a typed name.
+      dismissible: false,
       builder: (_) => CompleteDeliverySheet(delivery: delivery),
     );
   }

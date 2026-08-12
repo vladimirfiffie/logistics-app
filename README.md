@@ -124,13 +124,53 @@ it up somewhere that isn't this repo.
 
 Grab the APKs from the run's **Artifacts** section in the Actions tab.
 
-Pushing a `v*` tag adds a third job that publishes those same APKs as a
-GitHub **prerelease** (it reuses the artifact rather than rebuilding):
+### Releases
+
+`.github/workflows/release.yml` is separate and only runs for releases. It
+builds split **and** universal APKs, then publishes them to GitHub Releases.
+Two ways to trigger it:
+
+**From the Actions tab — no git credentials needed.** Open the **Release**
+workflow → **Run workflow** → enter a version in `tag`. The tag is created
+server-side, so this works even if you can't push tags from your machine.
+
+**Or by pushing a tag:**
 
 ```sh
 git tag v1.0.0-beta.1
 git push origin v1.0.0-beta.1
 ```
+
+Note `git push` alone never sends tags — you have to name the tag (or pass
+`--tags`). That is the usual reason a release "doesn't happen": the branch
+went up, the tag didn't, and a branch push is not a release trigger.
+
+**A hyphen in the tag makes it a prerelease.** `v1.0.0-beta.1` is a
+prerelease; `v1.0.0` is a full release and gets GitHub's "Latest" badge. This
+matters more than it looks — if *every* release is flagged prerelease, then
+`/releases/latest` returns 404 and the releases page degrades into a bare
+list of tags.
+
+Until an upload keystore exists, everything published here is debug-signed
+and sideload-only, so keep cutting hyphenated tags.
+
+### Release notes
+
+`lib/release_notes.dart` is the single source. It feeds both:
+
+- the in-app **What's new** sheet, shown once after an update (and reachable
+  any time from the icon in History's app bar), and
+- the GitHub release body, rendered by
+  `dart run tool/generate_release_notes.dart <tag>` during the release job.
+
+So writing a release means adding one `ReleaseNote` entry and bumping
+`version:` in pubspec.yaml. A test fails if those two disagree, which is what
+stops the app from claiming one version while the release page describes
+another. That file deliberately imports no Flutter, because the `tool/` script
+runs under plain `dart run` with no Flutter SDK.
+
+An unknown tag is not fatal — it emits a placeholder body and warns on stderr,
+so a `v0.0.0-manual` build still publishes.
 
 Every tag is marked prerelease deliberately: while the APKs are debug-signed
 they are sideload-only, and calling that a stable release would be a lie.

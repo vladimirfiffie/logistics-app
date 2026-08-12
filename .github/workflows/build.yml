@@ -3,8 +3,6 @@ name: build
 on:
   push:
     branches: [main]
-    # Tags drive releases: pushing v1.0.0-beta.1 publishes a prerelease.
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -88,12 +86,7 @@ jobs:
       - name: Collect APKs
         run: |
           mkdir -p dist
-          # Tag builds are named for the tag; branch builds for the commit.
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            label="$GITHUB_REF_NAME"
-          else
-            label="${GITHUB_SHA::7}"
-          fi
+          label="${GITHUB_SHA::7}"
           for abi in armeabi-v7a arm64-v8a x86_64; do
             src="build/app/outputs/flutter-apk/app-${abi}-release.apk"
             # Fail loudly rather than shipping a partial set that looks
@@ -109,54 +102,3 @@ jobs:
           path: dist/*.apk
           if-no-files-found: error
           retention-days: 14
-
-  # Runs only for a pushed v* tag. Reuses the APKs the job above already
-  # built rather than compiling them a second time, then publishes them as a
-  # GitHub prerelease. Uses the built-in GITHUB_TOKEN, so nothing to set up.
-  #
-  # Every tag is marked prerelease deliberately: while the APKs are
-  # debug-signed they are sideload-only, and calling that a stable release
-  # would be a lie.
-  prerelease:
-    name: publish prerelease
-    runs-on: ubuntu-latest
-    needs: apks
-    if: github.ref_type == 'tag'
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: logistics-apks
-          path: dist
-
-      - name: Publish prerelease
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          ls -lh dist
-          gh release create "$GITHUB_REF_NAME" \
-            dist/*.apk \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "$GITHUB_REF_NAME" \
-            --prerelease \
-            --notes "
-          > **Prerelease — sideload only.**
-          > These APKs are signed with the Android **debug** key, not an
-          > upload key, so they install for testing but cannot be published to
-          > Google Play. See \`README.md\` > Signing.
-
-          ### Which file do I want?
-
-          | File | For |
-          | --- | --- |
-          | \`arm64-v8a\` | Almost every phone made since ~2017. **Start here.** |
-          | \`armeabi-v7a\` | Older 32-bit devices. |
-          | \`x86_64\` | Emulators and x86 Chromebooks. |
-
-          Install with \`adb install logistics-${GITHUB_REF_NAME}-arm64-v8a.apk\`,
-          or copy it to the device and allow installs from unknown sources.
-
-          Installing the wrong ABI fails with \`INSTALL_FAILED_NO_MATCHING_ABIS\`
-          — that is the wrong file, not a broken build.
-          "

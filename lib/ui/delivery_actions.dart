@@ -5,7 +5,7 @@ import '../models/delivery.dart';
 import '../state/delivery_controller.dart';
 import '../state/tracking_controller.dart';
 import 'complete_delivery_sheet.dart';
-import 'failure_reason_dialog.dart';
+import 'failure_reason_sheet.dart';
 
 /// Closing out a stop is reachable from both the detail screen and the live
 /// tracking view, and both have to end the trip before writing the outcome.
@@ -29,7 +29,7 @@ Future<bool> completeDelivery(BuildContext context, Delivery delivery) async {
 /// Records a stop that could not be completed. Returns true if a reason was
 /// captured.
 Future<bool> failDelivery(BuildContext context, Delivery delivery) async {
-  final reason = await FailureReasonDialog.show(context);
+  final reason = await FailureReasonSheet.show(context);
   if (reason == null || !context.mounted) return false;
 
   final deliveries = context.read<DeliveryController>();

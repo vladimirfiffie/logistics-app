@@ -4,11 +4,14 @@ import 'package:provider/provider.dart';
 
 import '../data/delivery_repository.dart';
 import '../data/seed_data.dart';
+import '../release_notes.dart';
+import '../services/app_preferences.dart';
 import '../services/location_service.dart';
 import '../state/delivery_controller.dart';
 import '../state/tracking_controller.dart';
 import 'home_screen.dart';
 import 'onboarding_screen.dart';
+import 'whats_new_sheet.dart';
 
 enum _Stage { checking, onboarding, ready }
 
@@ -45,7 +48,31 @@ class _StartupGateState extends State<StartupGate> {
     }
 
     await context.read<TrackingController>().restore();
-    if (mounted) setState(() => _stage = _Stage.ready);
+    if (!mounted) return;
+    setState(() => _stage = _Stage.ready);
+    await _maybeShowWhatsNew(isFreshInstall: false);
+  }
+
+  /// Shows the changelog once per version, after the shell is on screen.
+  ///
+  /// The seen-version marker is written whether or not the sheet is shown, so
+  /// a fresh install is not greeted with a changelog and the *next* update
+  /// still gets one.
+  Future<void> _maybeShowWhatsNew({required bool isFreshInstall}) async {
+    const preferences = AppPreferences();
+    final current = currentRelease;
+    final lastSeen = await preferences.lastSeenVersion();
+
+    final show = shouldShowWhatsNew(
+      lastSeenVersion: lastSeen,
+      currentVersion: current.version,
+      isFreshInstall: isFreshInstall,
+    );
+    await preferences.setLastSeenVersion(current.version);
+
+    if (show && mounted) {
+      await WhatsNewSheet.show(context, current);
+    }
   }
 
   /// Seeds the first manifest. With location granted, the stops are placed
@@ -83,6 +110,9 @@ class _StartupGateState extends State<StartupGate> {
         _isBusy = false;
         _stage = _Stage.ready;
       });
+      // Records the version without showing the sheet — see
+      // shouldShowWhatsNew.
+      await _maybeShowWhatsNew(isFreshInstall: true);
     }
   }
 
