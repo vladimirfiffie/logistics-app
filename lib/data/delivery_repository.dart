@@ -15,7 +15,22 @@ abstract interface class DeliveryRepository {
 
   Future<Delivery?> fetchDelivery(String id);
 
+  /// The stop a scanned parcel label belongs to, or null if the label is not
+  /// on this manifest.
+  ///
+  /// A stop still to do wins over one already closed out: the same barcode
+  /// appears twice once a failed attempt has raised a retry, and the driver
+  /// scanning it is holding the parcel for the attempt that is still open.
+  Future<Delivery?> findByBarcode(String barcode);
+
   Future<void> saveDelivery(Delivery delivery);
+
+  /// Raises the follow-up stop for a failed attempt and returns it. The failed
+  /// row is left untouched — it is the record that the attempt happened.
+  Future<Delivery> raiseNextAttempt(
+    Delivery failed, {
+    required DateTime scheduledFor,
+  });
 
   /// Opens a tracking session for [deliveryId] and flips the stop to
   /// [DeliveryStatus.inTransit].

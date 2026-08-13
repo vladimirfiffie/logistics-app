@@ -71,6 +71,34 @@ enum PrecipitationUnit {
   final String detail;
 }
 
+/// What the timesheet counts money in.
+///
+/// A symbol, not an exchange rate: nothing is converted anywhere, this only
+/// decides what is printed in front of the figure.
+enum Currency {
+  pound('Pound', '£'),
+  dollar('Dollar', r'$'),
+  euro('Euro', '€'),
+  zloty('Złoty', 'zł'),
+  krona('Krona', 'kr');
+
+  const Currency(this.label, this.symbol);
+
+  final String label;
+  final String symbol;
+
+  String format(double amount) {
+    final figure = amount.toStringAsFixed(2);
+    // A trailing symbol reads right for the currencies that are written that
+    // way; putting "zł" in front of the number looks wrong to anyone who uses
+    // it.
+    return switch (this) {
+      Currency.zloty || Currency.krona => '$figure $symbol',
+      _ => '$symbol$figure',
+    };
+  }
+}
+
 /// How a date reads across the app. The pattern is fed straight to `intl`.
 enum DateStyle {
   dayMonth('Wed 12 Aug', 'EEE d MMM'),
@@ -99,13 +127,18 @@ enum ClockStyle {
 }
 
 enum ThemeChoice {
-  system('Follow system', Icons.brightness_auto_outlined),
-  light('Light', Icons.light_mode_outlined),
-  dark('Dark', Icons.dark_mode_outlined);
+  system('Follow system', 'Auto', Icons.brightness_auto_outlined),
+  light('Light', 'Light', Icons.light_mode_outlined),
+  dark('Dark', 'Dark', Icons.dark_mode_outlined);
 
-  const ThemeChoice(this.label, this.icon);
+  const ThemeChoice(this.label, this.shortLabel, this.icon);
 
   final String label;
+
+  /// For a segmented control, where three full labels will not fit across a
+  /// phone.
+  final String shortLabel;
+
   final IconData icon;
 
   ThemeMode get mode => switch (this) {
@@ -182,7 +215,8 @@ enum StopSort {
   distance('Distance', 'Nearest to you first.', Icons.near_me_outlined),
   route(
     'Best route',
-    'Nearest-neighbour order. A suggestion, not a plan.',
+    'Shortest way round, without jumping a time slot. A suggestion, not a '
+        'plan.',
     Icons.alt_route,
   ),
   name('A–Z', 'By customer name.', Icons.sort_by_alpha);
@@ -252,6 +286,9 @@ class AppSettings {
     this.autoTrackNextStop = false,
     this.onShiftNotification = true,
     this.breakReminderMinutes = 0,
+    this.currency = Currency.pound,
+    this.hourlyRate = 0,
+    this.mileageRate = 0,
   });
 
   final ThemeChoice theme;
@@ -352,6 +389,22 @@ class AppSettings {
   /// Zero switches it off.
   final int breakReminderMinutes;
 
+  /// What the timesheet prints its figures in.
+  final Currency currency;
+
+  /// Paid per hour worked, breaks already subtracted. Zero means "do not show
+  /// me money", which is the default — plenty of drivers are salaried, and a
+  /// wrong number on a timesheet is worse than no number.
+  final double hourlyRate;
+
+  /// Claimed per mile or per kilometre driven, following [distanceUnit]. The
+  /// UK's HMRC rate is 45p a mile at the time of writing; the US IRS rate is
+  /// per mile too. Zero switches the mileage line off.
+  final double mileageRate;
+
+  /// Whether the timesheet has anything to say about money.
+  bool get showsEarnings => hourlyRate > 0 || mileageRate > 0;
+
   /// Which unit the weather card should actually render, with
   /// [TemperatureUnit.matchUnits] resolved against [distanceUnit].
   bool get usesFahrenheit => switch (temperatureUnit) {
@@ -405,6 +458,9 @@ class AppSettings {
     bool? autoTrackNextStop,
     bool? onShiftNotification,
     int? breakReminderMinutes,
+    Currency? currency,
+    double? hourlyRate,
+    double? mileageRate,
   }) => AppSettings(
     theme: theme ?? this.theme,
     accent: accent ?? this.accent,
@@ -433,6 +489,9 @@ class AppSettings {
     autoTrackNextStop: autoTrackNextStop ?? this.autoTrackNextStop,
     onShiftNotification: onShiftNotification ?? this.onShiftNotification,
     breakReminderMinutes: breakReminderMinutes ?? this.breakReminderMinutes,
+    currency: currency ?? this.currency,
+    hourlyRate: hourlyRate ?? this.hourlyRate,
+    mileageRate: mileageRate ?? this.mileageRate,
   );
 
   @override
@@ -464,7 +523,10 @@ class AppSettings {
       other.signatureMode == signatureMode &&
       other.autoTrackNextStop == autoTrackNextStop &&
       other.onShiftNotification == onShiftNotification &&
-      other.breakReminderMinutes == breakReminderMinutes;
+      other.breakReminderMinutes == breakReminderMinutes &&
+      other.currency == currency &&
+      other.hourlyRate == hourlyRate &&
+      other.mileageRate == mileageRate;
 
   @override
   int get hashCode => Object.hashAll([
@@ -495,5 +557,8 @@ class AppSettings {
     autoTrackNextStop,
     onShiftNotification,
     breakReminderMinutes,
+    currency,
+    hourlyRate,
+    mileageRate,
   ]);
 }

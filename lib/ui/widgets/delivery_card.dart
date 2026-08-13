@@ -54,6 +54,29 @@ class DeliveryCard extends StatelessWidget {
                       letterSpacing: 0.6,
                     ),
                   ),
+                  // A stop that has already been tried once needs to say so
+                  // before the driver knocks: they are often the awkward ones.
+                  if (delivery.isRetry) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: scheme.errorContainer,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        'Attempt ${delivery.attempt}',
+                        style: TextStyle(
+                          color: scheme.onErrorContainer,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
                   const Spacer(),
                   StatusChip(delivery.status, dense: true),
                 ],

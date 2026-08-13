@@ -9,7 +9,9 @@ class AppDatabase {
 
   /// v2 added the `shifts` table.
   /// v3 added the `breaks` table and `deliveries.signature_path`.
-  static const _version = 3;
+  /// v4 added the parcel barcode, the customer's phone number, how many
+  /// parcels have been scanned off, and what happens to a stop that failed.
+  static const _version = 4;
 
   static Database? _instance;
 
@@ -51,9 +53,21 @@ class AppDatabase {
         recipient_name TEXT,
         proof_photo_path TEXT,
         signature_path TEXT,
-        failure_reason TEXT
+        failure_reason TEXT,
+        barcode TEXT,
+        customer_phone TEXT,
+        parcels_scanned INTEGER NOT NULL DEFAULT 0,
+        failure_action TEXT,
+        attempt INTEGER NOT NULL DEFAULT 1,
+        previous_attempt_id TEXT
       )
     ''');
+
+    // Scanning a label has to find its stop in one lookup, and the same
+    // barcode can appear twice once a failed stop raises a second attempt.
+    await db.execute(
+      'CREATE INDEX idx_deliveries_barcode ON deliveries(barcode)',
+    );
 
     await db.execute('''
       CREATE TABLE trips (
@@ -129,6 +143,27 @@ class AppDatabase {
     if (oldVersion < 3) {
       await _createBreaks(db);
       await db.execute('ALTER TABLE deliveries ADD COLUMN signature_path TEXT');
+    }
+    if (oldVersion < 4) {
+      // Every one of these is nullable or defaulted, so the existing rows are
+      // valid the moment the column lands and no backfill is needed.
+      await db.execute('ALTER TABLE deliveries ADD COLUMN barcode TEXT');
+      await db.execute('ALTER TABLE deliveries ADD COLUMN customer_phone TEXT');
+      await db.execute(
+        'ALTER TABLE deliveries ADD COLUMN parcels_scanned INTEGER NOT NULL '
+        'DEFAULT 0',
+      );
+      await db.execute('ALTER TABLE deliveries ADD COLUMN failure_action TEXT');
+      await db.execute(
+        'ALTER TABLE deliveries ADD COLUMN attempt INTEGER NOT NULL DEFAULT 1',
+      );
+      await db.execute(
+        'ALTER TABLE deliveries ADD COLUMN previous_attempt_id TEXT',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_deliveries_barcode '
+        'ON deliveries(barcode)',
+      );
     }
   }
 

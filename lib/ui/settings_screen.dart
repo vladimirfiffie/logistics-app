@@ -461,6 +461,39 @@ class ShiftSettingsPage extends StatelessWidget {
       title: 'Shift and breaks',
       children: [
         const TimesheetTile(),
+        _ChoiceTile<Currency>(
+          icon: Icons.payments_outlined,
+          title: 'Currency',
+          value: settings.currency,
+          valueLabel:
+              '${settings.currency.label} · ${settings.currency.symbol}',
+          options: Currency.values,
+          labelOf: (currency) => currency.label,
+          detailOf: (currency) => currency.format(12.5),
+          onChanged: controller.setCurrency,
+        ),
+        _RateTile(
+          icon: Icons.schedule,
+          title: 'Hourly rate',
+          hint: 'What an hour worked is worth',
+          value: settings.hourlyRate,
+          currency: settings.currency,
+          suffix: 'per hour',
+          onChanged: controller.setHourlyRate,
+        ),
+        _RateTile(
+          icon: Icons.route_outlined,
+          title: 'Mileage rate',
+          hint: settings.distanceUnit == DistanceUnit.imperial
+              ? 'What you claim per mile — 0.45 is the current HMRC rate'
+              : 'What you claim per kilometre',
+          value: settings.mileageRate,
+          currency: settings.currency,
+          suffix: settings.distanceUnit == DistanceUnit.imperial
+              ? 'per mile'
+              : 'per km',
+          onChanged: controller.setMileageRate,
+        ),
         SwitchListTile(
           secondary: const Icon(Icons.notifications_none),
           title: const Text('Show a notification while on shift'),
@@ -1290,6 +1323,119 @@ class _TextTile extends StatelessWidget {
     );
     controller.dispose();
     if (result != null) onChanged(result);
+  }
+}
+
+/// A rate in money, edited in a sheet with a numeric keypad.
+///
+/// Zero is a first-class value, not an empty field: it means "do not show me
+/// money", which is the right default for a salaried driver and for anyone who
+/// has not decided yet.
+class _RateTile extends StatelessWidget {
+  const _RateTile({
+    required this.icon,
+    required this.title,
+    required this.hint,
+    required this.value,
+    required this.currency,
+    required this.suffix,
+    required this.onChanged,
+  });
+
+  final IconData icon;
+  final String title;
+  final String hint;
+  final double value;
+  final Currency currency;
+
+  /// "per hour", "per mile" — what the figure is measured against.
+  final String suffix;
+
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final unset = value <= 0;
+
+    return ListTile(
+      leading: Icon(icon),
+      title: Text(title),
+      subtitle: Text(
+        unset
+            ? 'Not set — no figure on the timesheet'
+            : '${currency.format(value)} $suffix',
+        style: unset
+            ? theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontStyle: FontStyle.italic,
+              )
+            : null,
+      ),
+      trailing: const Icon(Icons.edit_outlined, size: 18),
+      onTap: () => _edit(context),
+    );
+  }
+
+  Future<void> _edit(BuildContext context) async {
+    final controller = TextEditingController(
+      text: value <= 0 ? '' : value.toStringAsFixed(2),
+    );
+
+    final result = await showAppSheet<String>(
+      context,
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          24,
+          0,
+          24,
+          24 + MediaQuery.viewInsetsOf(sheetContext).bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SheetHeader(title: title, subtitle: hint, icon: icon),
+            const SizedBox(height: 18),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: InputDecoration(
+                prefixText: '${currency.symbol} ',
+                suffixText: suffix,
+                border: const OutlineInputBorder(),
+              ),
+              onSubmitted: (text) => Navigator.of(sheetContext).pop(text),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Leave it empty to keep money off the timesheet altogether.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 18),
+            FilledButton(
+              onPressed: () => Navigator.of(sheetContext).pop(controller.text),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+              ),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    controller.dispose();
+    if (result == null) return;
+
+    // A comma is what half the world types for a decimal point, and rejecting
+    // it silently would look like the field is broken.
+    final cleaned = result.trim().replaceAll(',', '.');
+    onChanged(cleaned.isEmpty ? 0 : (double.tryParse(cleaned) ?? 0));
   }
 }
 

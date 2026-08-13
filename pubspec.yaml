@@ -56,6 +56,9 @@ dependencies:
   # Exports are written to app-private storage, so sharing is the only way a
   # driver gets the file off the device and into an expenses form.
   share_plus: ^13.3.0
+  # Parcel labels. Scanning a barcode finds its stop without the driver
+  # reading a reference off the screen with a parcel in each hand.
+  mobile_scanner: ^7.4.0
 
 dev_dependencies:
   flutter_test:

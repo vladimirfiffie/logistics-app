@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../data/delivery_repository.dart';
+import '../models/app_settings.dart';
 import '../models/shift.dart';
 import '../models/shift_break.dart';
+import '../models/trip.dart';
+import '../state/settings_controller.dart';
 import '../state/shift_controller.dart';
 import 'formatters.dart';
 import 'widgets/outcome_colors.dart';
@@ -30,6 +33,7 @@ class TimesheetScreen extends StatefulWidget {
 class _TimesheetScreenState extends State<TimesheetScreen> {
   List<Shift> _shifts = const [];
   Map<String, List<ShiftBreak>> _breaks = const {};
+  List<Trip> _trips = const [];
   bool _loading = true;
 
   @override
@@ -45,12 +49,31 @@ class _TimesheetScreenState extends State<TimesheetScreen> {
     final breaks = await repository.breaksForShifts([
       for (final shift in shifts) shift.id,
     ]);
+    // Trips carry the distance a mileage claim is made of. Read once and
+    // matched to shifts by when they ran, since a trip belongs to a stop
+    // rather than to a shift.
+    final trips = await repository.fetchTrips();
     if (!mounted) return;
     setState(() {
       _shifts = shifts;
       _breaks = breaks;
+      _trips = trips;
       _loading = false;
     });
+  }
+
+  /// Metres driven during [shift]. A trip counts towards the shift it started
+  /// in, which is the same rule a driver would apply reading their own day.
+  double _distance(Shift shift) {
+    final from = shift.startedAt;
+    final to = shift.endedAt ?? DateTime.now();
+    var total = 0.0;
+    for (final trip in _trips) {
+      if (trip.startedAt.isBefore(from)) continue;
+      if (trip.startedAt.isAfter(to)) continue;
+      total += trip.distanceMeters;
+    }
+    return total;
   }
 
   Duration _breakTime(Shift shift) => (_breaks[shift.id] ?? const []).fold(
@@ -137,6 +160,10 @@ class _TimesheetScreenState extends State<TimesheetScreen> {
                   Duration.zero,
                   (sum, shift) => sum + _breakTime(shift),
                 ),
+                distanceMeters: entry.value.fold(
+                  0.0,
+                  (sum, shift) => sum + _distance(shift),
+                ),
                 shifts: entry.value.length,
               ),
               for (final shift in entry.value)
@@ -145,6 +172,7 @@ class _TimesheetScreenState extends State<TimesheetScreen> {
                   breaks: _breaks[shift.id] ?? const [],
                   breakTime: _breakTime(shift),
                   worked: _worked(shift),
+                  distanceMeters: _distance(shift),
                 ),
             ],
           ],
@@ -159,21 +187,37 @@ class _WeekHeader extends StatelessWidget {
     required this.weekStart,
     required this.worked,
     required this.breaks,
+    required this.distanceMeters,
     required this.shifts,
   });
 
   final DateTime weekStart;
   final Duration worked;
   final Duration breaks;
+  final double distanceMeters;
   final int shifts;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final settings = context.appSettings;
 
     // The same green a delivered stop is drawn in: a week of hours banked is
     // work done, and it should not be a different colour from a drop done.
     final onCard = context.onDeliveredContainer;
+
+    // Hours pay and a mileage claim are different kinds of money — one is
+    // earnings, the other is expenses — so they are shown as two lines and
+    // only totalled when both are set.
+    final hoursPay = settings.hourlyRate <= 0
+        ? null
+        : settings.hourlyRate * (worked.inSeconds / 3600);
+    final mileage = settings.mileageRate <= 0
+        ? null
+        : settings.mileageRate *
+              (settings.distanceUnit == DistanceUnit.imperial
+                  ? distanceMeters / 1609.344
+                  : distanceMeters / 1000);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
@@ -204,12 +248,45 @@ class _WeekHeader extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      '$shifts ${shifts == 1 ? 'shift' : 'shifts'}'
-                      '${breaks == Duration.zero ? '' : ' · ${formatDuration(breaks)} on breaks'}',
+                      [
+                        '$shifts ${shifts == 1 ? 'shift' : 'shifts'}',
+                        if (breaks != Duration.zero)
+                          '${formatDuration(breaks)} on breaks',
+                        if (distanceMeters > 0)
+                          formatDistance(
+                            distanceMeters,
+                            unit: settings.distanceUnit,
+                          ),
+                      ].join(' · '),
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: onCard.withValues(alpha: 0.85),
                       ),
                     ),
+
+                    if (hoursPay != null || mileage != null) ...[
+                      const SizedBox(height: 10),
+                      Divider(height: 1, color: onCard.withValues(alpha: 0.2)),
+                      const SizedBox(height: 8),
+                      if (hoursPay != null)
+                        _MoneyLine(
+                          label: 'Hours',
+                          amount: settings.currency.format(hoursPay),
+                          color: onCard,
+                        ),
+                      if (mileage != null)
+                        _MoneyLine(
+                          label: 'Mileage claim',
+                          amount: settings.currency.format(mileage),
+                          color: onCard,
+                        ),
+                      if (hoursPay != null && mileage != null)
+                        _MoneyLine(
+                          label: 'Total',
+                          amount: settings.currency.format(hoursPay + mileage),
+                          color: onCard,
+                          bold: true,
+                        ),
+                    ],
                   ],
                 ),
               ),
@@ -221,18 +298,56 @@ class _WeekHeader extends StatelessWidget {
   }
 }
 
+/// One figure on the week card. Deliberately plain: this is a number someone
+/// will copy into an invoice, not a headline.
+class _MoneyLine extends StatelessWidget {
+  const _MoneyLine({
+    required this.label,
+    required this.amount,
+    required this.color,
+    this.bold = false,
+  });
+
+  final String label;
+  final String amount;
+  final Color color;
+  final bool bold;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final style = theme.textTheme.bodyMedium?.copyWith(
+      color: bold ? color : color.withValues(alpha: 0.9),
+      fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Row(
+        children: [
+          Text(label, style: style),
+          const Spacer(),
+          Text(amount, style: style),
+        ],
+      ),
+    );
+  }
+}
+
 class _ShiftRow extends StatelessWidget {
   const _ShiftRow({
     required this.shift,
     required this.breaks,
     required this.breakTime,
     required this.worked,
+    required this.distanceMeters,
   });
 
   final Shift shift;
   final List<ShiftBreak> breaks;
   final Duration breakTime;
   final Duration worked;
+  final double distanceMeters;
 
   @override
   Widget build(BuildContext context) {
@@ -272,6 +387,8 @@ class _ShiftRow extends StatelessWidget {
               '${ended == null ? 'now' : formatTime(ended)}',
           if (shift.vehicleLabel case final String van) van,
           if (shift.startedByTag) 'tag',
+          if (distanceMeters > 0)
+            formatDistance(distanceMeters, unit: context.distanceUnit),
           if (breaks.isNotEmpty)
             '${breaks.length} ${breaks.length == 1 ? 'break' : 'breaks'} '
                 '(${formatDuration(breakTime)})',

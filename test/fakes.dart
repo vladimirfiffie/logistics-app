@@ -37,6 +37,33 @@ class FakeDeliveryRepository implements DeliveryRepository {
     deliveries[delivery.id] = delivery;
   }
 
+  var _nextAttemptId = 0;
+
+  @override
+  Future<Delivery?> findByBarcode(String barcode) async {
+    final matches = deliveries.values
+        .where((delivery) => delivery.barcode == barcode.trim())
+        .toList();
+    if (matches.isEmpty) return null;
+    for (final delivery in matches) {
+      if (delivery.status.isOpen) return delivery;
+    }
+    return matches.first;
+  }
+
+  @override
+  Future<Delivery> raiseNextAttempt(
+    Delivery failed, {
+    required DateTime scheduledFor,
+  }) async {
+    final next = failed.nextAttempt(
+      id: 'retry-${_nextAttemptId++}',
+      scheduledFor: scheduledFor,
+    );
+    deliveries[next.id] = next;
+    return next;
+  }
+
   @override
   Future<Trip> startTrip(String deliveryId) async {
     if (trips.values.any((trip) => trip.isActive)) {

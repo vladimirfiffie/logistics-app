@@ -8,7 +8,9 @@ import 'package:path_provider/path_provider.dart';
 import '../models/app_settings.dart';
 import '../models/delivery.dart';
 import '../services/app_haptics.dart';
+import 'barcode_scan_sheet.dart';
 import 'widgets/app_sheet.dart';
+import 'widgets/outcome_colors.dart';
 import 'widgets/signature_pad.dart';
 
 /// What the driver captured when closing out a stop.
@@ -16,6 +18,7 @@ typedef ProofOfDelivery = ({
   String? recipientName,
   String? photoPath,
   String? signaturePath,
+  int parcelsScanned,
 });
 
 /// Bottom sheet for confirming a delivery: who signed for it and a photo of
@@ -71,12 +74,29 @@ class _CompleteDeliverySheetState extends State<CompleteDeliverySheet> {
   bool _hasSigned = false;
   String? _captureError;
 
+  /// Carried in from the stop, so a driver who scanned three of six parcels
+  /// onto the trolley earlier does not start again at the door.
+  late int _parcelsScanned;
+
   /// A required signature opens the pad straight away — there is no sense
   /// making the driver tap to reveal something they cannot skip.
   @override
   void initState() {
     super.initState();
     _showSignature = widget.signatureMode == SignatureMode.required;
+    _parcelsScanned = widget.delivery.parcelsScanned;
+  }
+
+  Future<void> _scanParcels() async {
+    final counted = await BarcodeScanSheet.countParcels(
+      context,
+      expected: widget.delivery.parcelCount,
+      alreadyScanned: _parcelsScanned,
+    );
+    if (counted == null || !mounted) return;
+    setState(
+      () => _parcelsScanned = counted.clamp(0, widget.delivery.parcelCount),
+    );
   }
 
   bool get _signatureMissing =>
@@ -149,6 +169,7 @@ class _CompleteDeliverySheetState extends State<CompleteDeliverySheet> {
       recipientName: name.isEmpty ? null : name,
       photoPath: _photoPath,
       signaturePath: signature,
+      parcelsScanned: _parcelsScanned,
     ));
   }
 
@@ -199,6 +220,13 @@ class _CompleteDeliverySheetState extends State<CompleteDeliverySheet> {
                 onChanged: (signed) => setState(() => _hasSigned = signed),
               ),
             ],
+            const SizedBox(height: 16),
+            _ParcelSlot(
+              expected: widget.delivery.parcelCount,
+              scanned: _parcelsScanned,
+              onScan: _scanParcels,
+              onClear: () => setState(() => _parcelsScanned = 0),
+            ),
             const SizedBox(height: 16),
             _PhotoSlot(
               path: _photoPath,
@@ -263,6 +291,83 @@ class _CompleteDeliverySheetState extends State<CompleteDeliverySheet> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Scanning the parcels off at the door.
+///
+/// Optional, always — a driver with one parcel in their hand does not need a
+/// camera to know it is one parcel. It earns its place on a six-box drop,
+/// where "did I bring them all in?" is a real question and the answer is
+/// otherwise a guess.
+class _ParcelSlot extends StatelessWidget {
+  const _ParcelSlot({
+    required this.expected,
+    required this.scanned,
+    required this.onScan,
+    required this.onClear,
+  });
+
+  final int expected;
+  final int scanned;
+  final VoidCallback onScan;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final all = scanned >= expected;
+
+    if (scanned == 0) {
+      return OutlinedButton.icon(
+        onPressed: onScan,
+        icon: const Icon(Icons.qr_code_scanner),
+        label: Text(
+          'Scan the $expected ${expected == 1 ? 'parcel' : 'parcels'} '
+          '(optional)',
+        ),
+        style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: all
+            ? context.deliveredContainer
+            : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            all ? Icons.check_circle : Icons.inventory_2_outlined,
+            color: all ? context.onDeliveredContainer : scheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              all
+                  ? 'All $expected scanned'
+                  : '$scanned of $expected scanned — '
+                        '${expected - scanned} still on the van',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: all ? context.onDeliveredContainer : null,
+              ),
+            ),
+          ),
+          if (!all)
+            TextButton(onPressed: onScan, child: const Text('Scan more')),
+          IconButton(
+            onPressed: onClear,
+            icon: const Icon(Icons.close, size: 18),
+            tooltip: 'Clear the count',
+          ),
+        ],
       ),
     );
   }

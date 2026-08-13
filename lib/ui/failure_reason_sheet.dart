@@ -1,12 +1,24 @@
 import 'package:flutter/material.dart';
 
+import '../models/delivery.dart';
 import '../services/app_haptics.dart';
 import 'widgets/app_sheet.dart';
 
-/// Asks why a stop could not be completed.
+/// Why a stop could not be completed, and what happens to the parcel now.
+class FailedStop {
+  const FailedStop({required this.reason, required this.action});
+
+  final String reason;
+  final FailureAction action;
+}
+
+/// Asks why a stop could not be completed, and what to do about it.
 ///
 /// The presets are the reasons that actually recur on a round; "Other" opens a
-/// free-text field so nothing gets forced into the wrong bucket.
+/// free-text field so nothing gets forced into the wrong bucket. The second
+/// half is the part that used to be missing: a parcel that could not be left
+/// is going back to the door or back to the depot, and the driver holding it
+/// is the one who knows which.
 class FailureReasonSheet extends StatefulWidget {
   const FailureReasonSheet({super.key});
 
@@ -19,9 +31,13 @@ class FailureReasonSheet extends StatefulWidget {
     'Ran out of time',
   ];
 
-  /// Returns the chosen reason, or null if dismissed.
-  static Future<String?> show(BuildContext context) =>
-      showAppSheet<String>(context, builder: (_) => const FailureReasonSheet());
+  /// Returns the reason and what happens next, or null if dismissed.
+  static Future<FailedStop?> show(BuildContext context) =>
+      showAppSheet<FailedStop>(
+        context,
+        maxHeightFactor: 0.9,
+        builder: (_) => const FailureReasonSheet(),
+      );
 
   @override
   State<FailureReasonSheet> createState() => _FailureReasonSheetState();
@@ -29,6 +45,11 @@ class FailureReasonSheet extends StatefulWidget {
 
 class _FailureReasonSheetState extends State<FailureReasonSheet> {
   String? _selected;
+
+  /// Carding and coming back tomorrow is what happens to most failed drops,
+  /// so it is what the sheet opens on.
+  FailureAction _action = FailureAction.cardedRetryTomorrow;
+
   final _otherController = TextEditingController();
 
   bool get _isOther => _selected == 'Other';
@@ -93,11 +114,45 @@ class _FailureReasonSheetState extends State<FailureReasonSheet> {
                 onChanged: (_) => setState(() {}),
               ),
             ],
-            const SizedBox(height: 22),
+
+            const SizedBox(height: 20),
+            Text(
+              'WHAT HAPPENS TO IT',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: Theme.of(context).colorScheme.primary,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.8,
+              ),
+            ),
+            const SizedBox(height: 6),
+            RadioGroup<FailureAction>(
+              groupValue: _action,
+              onChanged: (action) {
+                if (action == null) return;
+                AppHaptics.select();
+                setState(() => _action = action);
+              },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final action in FailureAction.values)
+                    RadioListTile<FailureAction>(
+                      value: action,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(action.label),
+                      subtitle: Text(action.detail),
+                    ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 12),
             FilledButton(
               onPressed: _result == null
                   ? null
-                  : () => Navigator.of(context).pop(_result),
+                  : () => Navigator.of(
+                      context,
+                    ).pop(FailedStop(reason: _result!, action: _action)),
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(50),
               ),

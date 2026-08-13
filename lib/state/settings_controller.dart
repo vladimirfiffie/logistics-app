@@ -49,6 +49,9 @@ class SettingsController extends ChangeNotifier {
   static const _autoTrackKey = 'settings.auto_track_next_stop';
   static const _onShiftNotificationKey = 'settings.on_shift_notification';
   static const _breakReminderKey = 'settings.break_reminder_minutes';
+  static const _currencyKey = 'settings.currency';
+  static const _hourlyRateKey = 'settings.hourly_rate';
+  static const _mileageRateKey = 'settings.mileage_rate';
 
   AppSettings _settings = const AppSettings();
   bool _isLoaded = false;
@@ -134,6 +137,13 @@ class SettingsController extends ChangeNotifier {
       autoTrackNextStop: prefs.getBool(_autoTrackKey) ?? false,
       onShiftNotification: prefs.getBool(_onShiftNotificationKey) ?? true,
       breakReminderMinutes: prefs.getInt(_breakReminderKey) ?? 0,
+      currency: _readEnum(
+        prefs.getString(_currencyKey),
+        Currency.values,
+        Currency.pound,
+      ),
+      hourlyRate: prefs.getDouble(_hourlyRateKey) ?? 0,
+      mileageRate: prefs.getDouble(_mileageRateKey) ?? 0,
     );
     _isLoaded = true;
     _syncMirrors();
@@ -304,6 +314,28 @@ class SettingsController extends ChangeNotifier {
     });
   }
 
+  Future<void> setCurrency(Currency value) async {
+    await _update(_settings.copyWith(currency: value), (prefs) {
+      return prefs.setString(_currencyKey, value.name);
+    });
+  }
+
+  /// Negative pay is not a thing, and a stray minus sign would turn a
+  /// timesheet into a debt.
+  Future<void> setHourlyRate(double value) async {
+    final rate = value.isFinite && value > 0 ? value : 0.0;
+    await _update(_settings.copyWith(hourlyRate: rate), (prefs) {
+      return prefs.setDouble(_hourlyRateKey, rate);
+    });
+  }
+
+  Future<void> setMileageRate(double value) async {
+    final rate = value.isFinite && value > 0 ? value : 0.0;
+    await _update(_settings.copyWith(mileageRate: rate), (prefs) {
+      return prefs.setDouble(_mileageRateKey, rate);
+    });
+  }
+
   /// Puts everything back to defaults.
   Future<void> resetToDefaults() async {
     final prefs = await SharedPreferences.getInstance();
@@ -335,6 +367,9 @@ class SettingsController extends ChangeNotifier {
       _autoTrackKey,
       _onShiftNotificationKey,
       _breakReminderKey,
+      _currencyKey,
+      _hourlyRateKey,
+      _mileageRateKey,
     ]) {
       await prefs.remove(key);
     }

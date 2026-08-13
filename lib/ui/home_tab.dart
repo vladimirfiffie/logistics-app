@@ -16,9 +16,9 @@ import '../state/settings_controller.dart';
 import '../state/shift_controller.dart';
 import '../state/tracking_controller.dart';
 import 'delivery_detail_sheet.dart';
-import 'nfc_scan_sheet.dart';
 import 'formatters.dart';
 import 'settings_screen.dart';
+import 'shift_actions.dart';
 import 'widgets/app_sheet.dart';
 import 'widgets/outcome_colors.dart';
 import 'widgets/page_top_inset.dart';
@@ -87,54 +87,10 @@ class _HomeTabState extends State<HomeTab> with WidgetsBindingObserver {
     if (shifts.isOnShift) {
       await _clockOff(shifts);
     } else {
-      await _clockOn(shifts);
+      // Shared with the prompt that appears when a stop is started off the
+      // clock, so both offer the tag and report a failure the same way.
+      await clockOn(context);
     }
-  }
-
-  /// Clocking on offers the tag as a shortcut and never requires it — the
-  /// sheet always carries a "start without a tag" button, so a phone with no
-  /// NFC or a van with no sticker is not a dead end. Drivers who will never
-  /// use a tag can turn the prompt off entirely in Settings.
-  Future<void> _clockOn(ShiftController shifts) async {
-    final settings = context.read<SettingsController>().settings;
-
-    var vehicle = settings.vehicleLabel.isEmpty ? null : settings.vehicleLabel;
-    var startedByTag = false;
-
-    if (settings.nfcClockOn) {
-      final result = await NfcScanSheet.show(
-        context,
-        title: 'Start your shift',
-        subtitle: 'Tap the tag in your van, or start without one.',
-        manualLabel: 'Start without a tag',
-      );
-      if (result == null || !mounted) return;
-      if (result case NfcSheetTag(:final tag)) {
-        vehicle = tag.label;
-        startedByTag = true;
-      }
-    }
-
-    final started = await shifts.start(
-      vehicleLabel: vehicle,
-      startedByTag: startedByTag,
-    );
-    if (!mounted) return;
-
-    // A failed clock-on used to be completely silent: the button did nothing
-    // and the card stayed on "Not on shift".
-    if (started == null) {
-      await AppHaptics.error();
-      if (mounted) _say('Could not clock on. ${shifts.error ?? ''}'.trim());
-      return;
-    }
-
-    await AppHaptics.trackingStarted();
-    if (!mounted) return;
-    _say(
-      'Clocked on at ${formatTime(started.startedAt)}'
-      '${vehicle == null ? '' : ' · $vehicle'}.',
-    );
   }
 
   /// Clocking off is the end of the driver's paid day, and it is one tap away
@@ -483,42 +439,53 @@ class _HomeTabState extends State<HomeTab> with WidgetsBindingObserver {
             ).animate().fadeIn(delay: 40.ms, duration: 300.ms),
           ),
 
-          SliverToBoxAdapter(
-            child: _ProgressCard(
-              done: done,
-              total: total,
-              parcels: controller.remainingParcels,
-            ).animate().fadeIn(delay: 80.ms, duration: 320.ms).moveY(begin: 12),
-          ),
+          // Both of these are reports on a day that has happened. Before the
+          // first drop they are a ring at nought per cent and a row of zeroes
+          // — three cards deep on a screen whose job at that hour is to say
+          // where you are going first. They appear as soon as there is
+          // something to report.
+          if (done > 0)
+            SliverToBoxAdapter(
+              child:
+                  _ProgressCard(
+                        done: done,
+                        total: total,
+                        parcels: controller.remainingParcels,
+                      )
+                      .animate()
+                      .fadeIn(delay: 80.ms, duration: 320.ms)
+                      .moveY(begin: 12),
+            ),
 
-          SliverToBoxAdapter(
-            child:
-                Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
-                      child: Row(
-                        children: [
-                          _MiniStat(
-                            icon: Icons.route_outlined,
-                            label: 'Driven',
-                            value: formatDistance(_distanceToday, unit: unit),
-                          ),
-                          _MiniStat(
-                            icon: Icons.timer_outlined,
-                            label: 'Driving',
-                            value: formatDuration(_drivingToday),
-                          ),
-                          _MiniStat(
-                            icon: Icons.inventory_2_outlined,
-                            label: 'Parcels',
-                            value: '${controller.remainingParcels}',
-                          ),
-                        ],
-                      ),
-                    )
-                    .animate()
-                    .fadeIn(delay: 160.ms, duration: 320.ms)
-                    .moveY(begin: 12),
-          ),
+          if (_distanceToday > 0 || _drivingToday > Duration.zero)
+            SliverToBoxAdapter(
+              child:
+                  Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                        child: Row(
+                          children: [
+                            _MiniStat(
+                              icon: Icons.route_outlined,
+                              label: 'Driven',
+                              value: formatDistance(_distanceToday, unit: unit),
+                            ),
+                            _MiniStat(
+                              icon: Icons.timer_outlined,
+                              label: 'Driving',
+                              value: formatDuration(_drivingToday),
+                            ),
+                            _MiniStat(
+                              icon: Icons.inventory_2_outlined,
+                              label: 'Parcels',
+                              value: '${controller.remainingParcels}',
+                            ),
+                          ],
+                        ),
+                      )
+                      .animate()
+                      .fadeIn(delay: 160.ms, duration: 320.ms)
+                      .moveY(begin: 12),
+            ),
 
           SliverToBoxAdapter(
             child:
@@ -542,33 +509,23 @@ class _HomeTabState extends State<HomeTab> with WidgetsBindingObserver {
                     .moveY(begin: 12),
           ),
 
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-              child: Text(
-                'COMING UP',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.primary,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.8,
-                ),
-              ),
-            ),
-          ),
-
-          if (open.length <= 1)
+          // A heading over "nothing else queued" is two lines saying the same
+          // nothing, so the whole section waits until there is a queue.
+          if (upcoming.isNotEmpty) ...[
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
                 child: Text(
-                  'Nothing else queued.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                  'COMING UP',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.primary,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
                   ),
                 ),
               ),
-            )
-          else
+            ),
+
             SliverList.builder(
               itemCount: upcoming.length,
               itemBuilder: (context, index) {
@@ -606,6 +563,7 @@ class _HomeTabState extends State<HomeTab> with WidgetsBindingObserver {
                 );
               },
             ),
+          ],
 
           const SliverToBoxAdapter(child: SizedBox(height: 28)),
         ],

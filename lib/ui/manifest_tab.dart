@@ -12,6 +12,7 @@ import '../services/location_service.dart';
 import '../services/route_planner.dart';
 import '../state/delivery_controller.dart';
 import '../state/settings_controller.dart';
+import 'barcode_scan_sheet.dart';
 import 'delivery_detail_sheet.dart';
 import 'formatters.dart';
 import 'widgets/app_sheet.dart';
@@ -227,6 +228,47 @@ class _ManifestTabState extends State<ManifestTab> {
     if (startedTracking ?? false) widget.onTrackingStarted();
   }
 
+  /// Scan a parcel, land on its stop.
+  ///
+  /// The way a driver actually finds work: they are holding a box, not
+  /// looking at a list. A label that is not on the manifest says so plainly
+  /// rather than opening the nearest-looking stop, and a stop already closed
+  /// out opens anyway — "that one went this morning" is exactly the question
+  /// being asked when someone scans a parcel they did not expect to still
+  /// have.
+  Future<void> _scanForStop() async {
+    final code = await BarcodeScanSheet.findStop(context);
+    if (code == null || !mounted) return;
+
+    final deliveries = context.read<DeliveryController>();
+    final messenger = ScaffoldMessenger.of(context);
+    final found = await deliveries.findByBarcode(code);
+
+    if (!mounted) return;
+    if (found == null) {
+      await AppHaptics.error();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('No stop on this manifest carries the label $code.'),
+          duration: const Duration(seconds: 5),
+        ),
+      );
+      return;
+    }
+
+    if (!found.status.isOpen) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            '${found.reference} is already closed out '
+            '(${found.status.label.toLowerCase()}).',
+          ),
+        ),
+      );
+    }
+    await _open(found);
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = context.watch<DeliveryController>();
@@ -269,6 +311,14 @@ class _ManifestTabState extends State<ManifestTab> {
                         icon: const Icon(Icons.clear),
                         tooltip: 'Clear search',
                       ),
+                    // Next to the search field on purpose: scanning a label
+                    // and typing a reference are the same job done two ways,
+                    // and one hand is usually holding a parcel.
+                    IconButton(
+                      onPressed: _scanForStop,
+                      icon: const Icon(Icons.qr_code_scanner),
+                      tooltip: 'Scan a parcel label',
+                    ),
                   ],
                   onChanged: (value) => setState(() => _query = value),
                 ),
@@ -445,8 +495,9 @@ class _RouteSavingBanner extends StatelessWidget {
               Expanded(
                 child: Text(
                   'About ${formatDistance(saving, unit: unit)} shorter than '
-                  'working down the time slots. Straight-line estimate — your '
-                  'slots and the roads still win.',
+                  'working straight down the list. Your time slots are kept '
+                  'in order — this only reorders stops booked for the same '
+                  'window. Straight-line estimate; the roads still win.',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: scheme.onTertiaryContainer,
                   ),

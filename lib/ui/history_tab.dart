@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../data/delivery_repository.dart';
 import '../models/delivery.dart';
 import '../models/trip.dart';
+import '../services/app_haptics.dart';
 import '../state/delivery_controller.dart';
 import '../state/settings_controller.dart';
 import 'delivery_detail_sheet.dart';
@@ -26,13 +27,68 @@ class HistoryTab extends StatefulWidget {
   State<HistoryTab> createState() => _HistoryTabState();
 }
 
+/// How far back the history list reaches.
+enum _Period {
+  any('Any time'),
+  today('Today'),
+  week('This week'),
+  month('This month');
+
+  const _Period(this.label);
+
+  final String label;
+
+  /// Midnight on the earliest day this period includes, or null for all of it.
+  DateTime? startFrom(DateTime now) {
+    final today = DateTime(now.year, now.month, now.day);
+    return switch (this) {
+      _Period.any => null,
+      _Period.today => today,
+      // The working week, starting Monday — the same week the timesheet pays
+      // by, so the two screens agree about what "this week" means.
+      _Period.week => today.subtract(Duration(days: today.weekday - 1)),
+      _Period.month => DateTime(now.year, now.month),
+    };
+  }
+}
+
 class _HistoryTabState extends State<HistoryTab> {
   List<Trip> _trips = const [];
+
+  final _searchController = TextEditingController();
+  String _query = '';
+  _Period _period = _Period.any;
 
   @override
   void initState() {
     super.initState();
     _loadTrips();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  /// Same fields the manifest searches, so one habit works on both screens.
+  bool _matchesQuery(Delivery stop) {
+    final query = _query.trim().toLowerCase();
+    if (query.isEmpty) return true;
+    return stop.reference.toLowerCase().contains(query) ||
+        stop.customerName.toLowerCase().contains(query) ||
+        stop.address.toLowerCase().contains(query) ||
+        (stop.recipientName?.toLowerCase().contains(query) ?? false) ||
+        (stop.barcode?.toLowerCase().contains(query) ?? false);
+  }
+
+  bool _matchesPeriod(Delivery stop) {
+    final from = _period.startFrom(DateTime.now());
+    if (from == null) return true;
+    final at = stop.completedAt;
+    // A stop with no completion time cannot be placed in a period, so it only
+    // shows when no period is asked for.
+    return at != null && !at.isBefore(from);
   }
 
   Future<void> _loadTrips() async {
@@ -79,9 +135,15 @@ class _HistoryTabState extends State<HistoryTab> {
     final failed = closed.length - delivered;
     final trips = _tripsByDelivery;
 
+    final filtering = _query.trim().isNotEmpty || _period != _Period.any;
+    final matching = [
+      for (final stop in closed)
+        if (_matchesQuery(stop) && _matchesPeriod(stop)) stop,
+    ];
+
     // Newest first, and stops with no completion time sink to the bottom
     // rather than claiming the epoch.
-    final sorted = [...closed]
+    final sorted = [...matching]
       ..sort((a, b) {
         final left = a.completedAt;
         final right = b.completedAt;
@@ -127,6 +189,9 @@ class _HistoryTabState extends State<HistoryTab> {
                   Text(
                     closed.isEmpty
                         ? 'Nothing closed out yet.'
+                        : filtering
+                        ? '${matching.length} of ${closed.length} '
+                              '${closed.length == 1 ? 'stop' : 'stops'}'
                         : '${closed.length} '
                               '${closed.length == 1 ? 'stop' : 'stops'} closed '
                               'out',
@@ -139,7 +204,55 @@ class _HistoryTabState extends State<HistoryTab> {
             ).animate().fadeIn(duration: 300.ms).moveY(begin: 8),
           ),
 
-          if (closed.isNotEmpty) ...[
+          // Only once there is enough here to need finding. A search bar over
+          // three stops is furniture.
+          if (closed.length > 3) ...[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+                child: SearchBar(
+                  controller: _searchController,
+                  hintText: 'Search reference, customer, street or signer',
+                  leading: const Icon(Icons.search),
+                  trailing: [
+                    if (_query.trim().isNotEmpty)
+                      IconButton(
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() => _query = '');
+                        },
+                        icon: const Icon(Icons.clear),
+                        tooltip: 'Clear search',
+                      ),
+                  ],
+                  onChanged: (value) => setState(() => _query = value),
+                ),
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Row(
+                  children: [
+                    for (final period in _Period.values) ...[
+                      ChoiceChip(
+                        label: Text(period.label),
+                        selected: _period == period,
+                        onSelected: (_) {
+                          AppHaptics.select();
+                          setState(() => _period = period);
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ],
+
+          if (closed.isNotEmpty && !filtering) ...[
             SliverToBoxAdapter(
               child: _OutcomeCard(delivered: delivered, failed: failed)
                   .animate()
@@ -180,7 +293,7 @@ class _HistoryTabState extends State<HistoryTab> {
             ),
           ],
 
-          if (closed.isEmpty)
+          if (sorted.isEmpty)
             SliverFillRemaining(
               hasScrollBody: false,
               child: Padding(
@@ -189,24 +302,41 @@ class _HistoryTabState extends State<HistoryTab> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(
-                      Icons.history,
+                      filtering ? Icons.search_off : Icons.history,
                       size: 52,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                     const SizedBox(height: 14),
                     Text(
-                      'Nothing here yet',
+                      filtering ? 'No match' : 'Nothing here yet',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'Every stop you close out lands here, with the route you '
-                      'drove to get to it.',
+                      filtering
+                          ? 'Nothing closed out matches that. Try a wider '
+                                'period, or clear the search.'
+                          : 'Every stop you close out lands here, with the '
+                                'route you drove to get to it.',
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
+                    if (filtering) ...[
+                      const SizedBox(height: 14),
+                      TextButton.icon(
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() {
+                            _query = '';
+                            _period = _Period.any;
+                          });
+                        },
+                        icon: const Icon(Icons.clear_all),
+                        label: const Text('Clear filters'),
+                      ),
+                    ],
                   ],
                 ),
               ),

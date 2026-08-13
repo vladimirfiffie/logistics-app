@@ -78,7 +78,8 @@ void main() {
 
   tearDown(() => db.close());
 
-  test('a v2 install upgrades to v3 keeping everything it had', () async {
+  test('a v2 install upgrades to the current version keeping '
+      'everything it had', () async {
     await _createV2Schema(db);
 
     // A round already part-done on the old version.
@@ -125,8 +126,83 @@ void main() {
     expect(shift!.vehicleLabel, 'LT21 KXR');
     expect(shift.startedByTag, isTrue);
 
-    // And the new column exists, empty.
+    // And every column added since exists, at its default.
     expect(delivery.signaturePath, isNull);
+    expect(delivery.barcode, isNull);
+    expect(delivery.customerPhone, isNull);
+    expect(delivery.failureAction, isNull);
+    expect(delivery.parcelsScanned, 0);
+    expect(delivery.attempt, 1);
+    expect(delivery.previousAttemptId, isNull);
+  });
+
+  test('a v3 install picks up the v4 columns', () async {
+    await _createV2Schema(db);
+    await AppDatabase.upgradeSchemaForTesting(db, 2);
+    final repository = LocalDeliveryRepository(db);
+
+    await repository.saveDelivery(
+      Delivery(
+        id: 'd3',
+        reference: 'LG-1041',
+        customerName: 'Meridian Dental',
+        address: '221 Oakfield Avenue',
+        latitude: 51.5,
+        longitude: -0.12,
+        status: DeliveryStatus.pending,
+        scheduledFor: DateTime(2026, 8, 12, 9),
+        parcelCount: 3,
+        barcode: 'JD1041000042',
+        customerPhone: '020 7946 0123',
+        parcelsScanned: 2,
+      ),
+    );
+
+    final found = await repository.findByBarcode('JD1041000042');
+    expect(found!.id, 'd3');
+    expect(found.customerPhone, '020 7946 0123');
+    expect(found.parcelsScanned, 2);
+  });
+
+  test('a failed stop can raise its next attempt', () async {
+    await AppDatabase.createSchemaForTesting(db);
+    final repository = LocalDeliveryRepository(db);
+
+    final first = Delivery(
+      id: 'd4',
+      reference: 'LG-1042',
+      customerName: 'Nadia Okonkwo',
+      address: 'Flat 12B, Perrin House',
+      latitude: 51.5,
+      longitude: -0.12,
+      status: DeliveryStatus.failed,
+      scheduledFor: DateTime(2026, 8, 12, 9),
+      parcelCount: 2,
+      barcode: 'JD1042000007',
+      failureReason: 'Nobody home',
+      failureAction: FailureAction.cardedRetryTomorrow,
+      completedAt: DateTime(2026, 8, 12, 16, 30),
+    );
+    await repository.saveDelivery(first);
+
+    final next = await repository.raiseNextAttempt(
+      first,
+      scheduledFor: DateTime(2026, 8, 13, 9),
+    );
+
+    expect(next.attempt, 2);
+    expect(next.previousAttemptId, 'd4');
+    expect(next.status, DeliveryStatus.pending);
+    expect(next.failureReason, isNull);
+    expect(next.parcelCount, 2);
+
+    // The failed attempt is still there, untouched.
+    final failed = await repository.fetchDelivery('d4');
+    expect(failed!.status, DeliveryStatus.failed);
+    expect(failed.failureAction, FailureAction.cardedRetryTomorrow);
+
+    // And scanning the shared label finds the attempt still open.
+    expect((await repository.findByBarcode('JD1042000007'))!.id, next.id);
   });
 
   test('the upgrade adds a working breaks table', () async {
@@ -167,7 +243,7 @@ void main() {
 
   test('a fresh install lands on the current version directly', () async {
     await AppDatabase.createSchemaForTesting(db);
-    expect(AppDatabase.schemaVersion, 3);
+    expect(AppDatabase.schemaVersion, 4);
 
     final repository = LocalDeliveryRepository(db);
     final shift = await repository.startShift();

@@ -16,6 +16,7 @@ import '../state/settings_controller.dart';
 import '../state/tracking_controller.dart';
 import 'delivery_actions.dart';
 import 'formatters.dart';
+import 'shift_actions.dart';
 import 'widgets/app_sheet.dart';
 import 'widgets/outcome_colors.dart';
 import 'widgets/status_chip.dart';
@@ -123,8 +124,31 @@ class _DeliveryDetailSheetState extends State<DeliveryDetailSheet> {
                     _InfoRow(
                       icon: Icons.inventory_2_outlined,
                       label: 'Parcels',
-                      value: '${delivery.parcelCount}',
+                      value: delivery.parcelsScanned == 0
+                          ? '${delivery.parcelCount}'
+                          : '${delivery.parcelsScanned} of '
+                                '${delivery.parcelCount} scanned',
                     ),
+                    if (delivery.barcode case final String barcode)
+                      _InfoRow(
+                        icon: Icons.qr_code_2,
+                        label: 'Label',
+                        value: barcode,
+                      ),
+                    if (delivery.customerPhone case final String phone)
+                      _InfoRow(
+                        icon: Icons.phone_outlined,
+                        label: 'Phone',
+                        value: phone,
+                      ),
+                    if (delivery.isRetry)
+                      _InfoRow(
+                        icon: Icons.replay,
+                        label: 'Attempt',
+                        value:
+                            '${delivery.attempt} — an earlier attempt could '
+                            'not be delivered',
+                      ),
                     _InfoRow(
                       icon: Icons.my_location,
                       label: 'Coordinates',
@@ -171,6 +195,38 @@ class _DeliveryDetailSheetState extends State<DeliveryDetailSheet> {
         label: const Text('Navigate with maps app'),
         style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(50)),
       ),
+
+      // Only when there is a number to use. Half the stops on a real round
+      // have none, and a dead button is worse than no button.
+      if (delivery.customerPhone case final String phone) ...[
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () => _call(phone),
+                icon: const Icon(Icons.phone_outlined),
+                label: const Text('Call'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(50),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () => _text(phone, delivery),
+                icon: const Icon(Icons.sms_outlined),
+                label: const Text('Text'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(50),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+
       const SizedBox(height: 10),
 
       if (delivery.status == DeliveryStatus.pending)
@@ -224,6 +280,10 @@ class _DeliveryDetailSheetState extends State<DeliveryDetailSheet> {
   }
 
   Future<void> _startTrip(Delivery delivery) async {
+    // Asked before the GPS is touched: a driver who meant to clock on first
+    // should not have to stop a recording to do it.
+    if (!await ensureOnShift(context) || !mounted) return;
+
     final tracking = context.read<TrackingController>();
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
@@ -288,6 +348,46 @@ class _DeliveryDetailSheetState extends State<DeliveryDetailSheet> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text('Coordinates copied')));
+  }
+
+  /// Opens the dialler with the number in it rather than placing the call.
+  ///
+  /// `tel:` needs no permission and gives the driver the beat they need to
+  /// notice they are about to ring a customer at seven in the morning.
+  Future<void> _call(String phone) async {
+    final uri = Uri(scheme: 'tel', path: _dialable(phone));
+    if (await _launch(uri)) return;
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('No app on this phone can place a call.')),
+    );
+  }
+
+  /// Opens the messaging app with a message already written. Sending it is
+  /// the driver's tap, not ours — this app sends nothing on anyone's behalf.
+  Future<void> _text(String phone, Delivery delivery) async {
+    final body = Uri.encodeComponent(
+      'Hi — your delivery ${delivery.reference} is on its way. '
+      'I should be with you shortly.',
+    );
+    final uri = Uri.parse('smsto:${_dialable(phone)}?body=$body');
+    if (await _launch(uri)) return;
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('No messaging app could handle this.')),
+    );
+  }
+
+  /// Spaces and brackets are for reading, not for dialling.
+  static String _dialable(String phone) =>
+      phone.replaceAll(RegExp(r'[^\d+]'), '');
+
+  Future<bool> _launch(Uri uri) async {
+    try {
+      return await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } on PlatformException {
+      return false;
+    }
   }
 
   Future<void> _openInMaps(Delivery delivery) async {

@@ -39,7 +39,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final _pages = PageController();
   int _page = 0;
 
-  static const _lastPage = 4;
+  static const _vanPage = 3;
+  static const _preferencesPage = 4;
+  static const _lastPage = 5;
+
+  /// Jumps back to the page that sets something, from the review at the end.
+  void _editOn(int page) {
+    AppHaptics.select();
+    _pages.animateToPage(
+      page,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
+  }
 
   @override
   void dispose() {
@@ -90,12 +102,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   AppHaptics.select();
                   setState(() => _page = page);
                 },
-                children: const [
-                  _WelcomePage(),
-                  _TrackingPage(),
-                  _PrivacyPage(),
-                  _VanPage(),
-                  _PreferencesPage(),
+                children: [
+                  const _WelcomePage(),
+                  const _TrackingPage(),
+                  const _PrivacyPage(),
+                  const _VanPage(),
+                  const _PreferencesPage(),
+                  _ReviewPage(
+                    onEditVan: () => _editOn(_vanPage),
+                    onEditPreferences: () => _editOn(_preferencesPage),
+                  ),
                 ],
               ),
             ),
@@ -467,8 +483,47 @@ class _PreferencesPage extends StatelessWidget {
     return _Page(
       icon: Icons.tune,
       title: 'How should it read?',
-      body: 'Two quick choices. Both live in Settings if you change your mind.',
+      body:
+          'A few quick choices. All of them live in Settings if you change '
+          'your mind.',
       children: [
+        Text(
+          'THEME',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.primary,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.8,
+          ),
+        ),
+        const SizedBox(height: 8),
+        SegmentedButton<ThemeChoice>(
+          segments: [
+            for (final choice in ThemeChoice.values)
+              ButtonSegment(
+                value: choice,
+                icon: Icon(choice.icon),
+                label: Text(choice.shortLabel),
+              ),
+          ],
+          selected: {settings.theme},
+          onSelectionChanged: (selection) {
+            AppHaptics.select();
+            controller.setTheme(selection.first);
+          },
+        ),
+        const SizedBox(height: 8),
+        Text(
+          settings.theme == ThemeChoice.system
+              ? 'Follows whatever your phone is set to, so it goes dark when '
+                    'your phone does.'
+              : 'Stays ${settings.theme.label.toLowerCase()} whatever your '
+                    'phone is set to. There is a true-black mode for OLED '
+                    'screens in Settings.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 20),
         Text(
           'UNITS',
           style: theme.textTheme.labelSmall?.copyWith(
@@ -523,6 +578,167 @@ class _PreferencesPage extends StatelessWidget {
           },
         ),
       ],
+    );
+  }
+}
+
+/// The last page before the permission prompt: everything that was just
+/// chosen, in one list, with a way back to each of it.
+///
+/// Five pages of setup end with a button that asks for location, and the
+/// driver has by then swiped past the two fields and the three toggles they
+/// filled in. This is the chance to notice the van is blank or the units are
+/// wrong while it still costs one tap to fix.
+class _ReviewPage extends StatelessWidget {
+  const _ReviewPage({required this.onEditVan, required this.onEditPreferences});
+
+  final VoidCallback onEditVan;
+  final VoidCallback onEditPreferences;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final settings = context.watch<SettingsController>().settings;
+
+    return _Page(
+      icon: Icons.checklist_rtl,
+      title: 'Ready to go',
+      body:
+          'How the app is set up. Tap anything to change it now, or leave '
+          'it — all of this lives in Settings.',
+      children: [
+        _ReviewRow(
+          icon: Icons.badge_outlined,
+          label: 'Your name',
+          value: settings.driverName,
+          empty: 'Not set — no greeting by name',
+          onTap: onEditVan,
+        ),
+        _ReviewRow(
+          icon: Icons.local_shipping_outlined,
+          label: 'Van or round',
+          value: settings.vehicleLabel,
+          empty: 'Not set',
+          onTap: onEditVan,
+        ),
+        _ReviewRow(
+          icon: settings.theme.icon,
+          label: 'Theme',
+          value: settings.theme.label,
+          onTap: onEditPreferences,
+        ),
+        _ReviewRow(
+          icon: Icons.straighten,
+          label: 'Units',
+          value:
+              '${settings.distanceUnit.label} · '
+              '${settings.distanceUnit.detail.toLowerCase()}',
+          onTap: onEditPreferences,
+        ),
+        _ReviewRow(
+          icon: Icons.vibration,
+          label: 'Haptics',
+          value: settings.hapticsEnabled ? 'On' : 'Off',
+          onTap: onEditPreferences,
+        ),
+        const SizedBox(height: 8),
+        // Says what the button underneath is about to do. Android's own
+        // dialog will not.
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              Icons.my_location,
+              size: 18,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Next, Android asks for location. Nothing is recorded until '
+                'you start a stop, and you can skip it and grant it later '
+                'from Settings.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _ReviewRow extends StatelessWidget {
+  const _ReviewRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.onTap,
+    this.empty,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  /// Shown, greyed, when [value] is blank.
+  final String? empty;
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final unset = value.trim().isEmpty;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+          child: Row(
+            children: [
+              Icon(icon, size: 22, color: theme.colorScheme.primary),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                    Text(
+                      unset ? (empty ?? 'Not set') : value,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: unset ? FontWeight.w400 : FontWeight.w600,
+                        fontStyle: unset ? FontStyle.italic : null,
+                        color: unset
+                            ? theme.colorScheme.onSurfaceVariant
+                            : null,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.edit_outlined,
+                size: 17,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

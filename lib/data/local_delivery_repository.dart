@@ -39,6 +39,39 @@ class LocalDeliveryRepository implements DeliveryRepository {
   }
 
   @override
+  Future<Delivery?> findByBarcode(String barcode) async {
+    final trimmed = barcode.trim();
+    if (trimmed.isEmpty) return null;
+
+    // Open stops first, then the most recent closed one — scanning a label
+    // for a stop already delivered should still find it, so the sheet can say
+    // "this one is done" rather than "not on your manifest".
+    final rows = await _db.query(
+      'deliveries',
+      where: 'barcode = ?',
+      whereArgs: [trimmed],
+      orderBy: 'attempt DESC, scheduled_for ASC',
+    );
+    if (rows.isEmpty) return null;
+
+    final found = rows.map(Delivery.fromMap).toList();
+    for (final delivery in found) {
+      if (delivery.status.isOpen) return delivery;
+    }
+    return found.first;
+  }
+
+  @override
+  Future<Delivery> raiseNextAttempt(
+    Delivery failed, {
+    required DateTime scheduledFor,
+  }) async {
+    final next = failed.nextAttempt(id: _uuid.v4(), scheduledFor: scheduledFor);
+    await _db.insert('deliveries', next.toMap());
+    return next;
+  }
+
+  @override
   Future<void> saveDelivery(Delivery delivery) async {
     // Update-then-insert rather than INSERT OR REPLACE. SQLite implements
     // REPLACE as a delete followed by an insert, which fires

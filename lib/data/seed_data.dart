@@ -106,10 +106,11 @@ class SeedData {
     for (var i = 0; i < _stops.length; i++) {
       final stop = _stops[i];
       final point = _offset(start, northKm: stop.northKm, eastKm: stop.eastKm);
+      final reference = 'LG-${1040 + i}';
       await repository.saveDelivery(
         Delivery(
           id: uuid.v4(),
-          reference: 'LG-${1040 + i}',
+          reference: reference,
           customerName: stop.customer,
           address: stop.address,
           latitude: point.latitude,
@@ -118,6 +119,10 @@ class SeedData {
           scheduledFor: dayStart.add(Duration(hours: stop.hourOffset)),
           notes: stop.notes,
           parcelCount: stop.parcels,
+          barcode: _barcodeFor(reference, i),
+          // Not every stop has a number, which is worth seeding too: the call
+          // and text buttons have to cope with its absence.
+          customerPhone: i.isEven ? _phoneFor(i) : null,
         ),
       );
     }
@@ -239,9 +244,10 @@ class SeedData {
 
       slot = slot.add(Duration(minutes: 20 + rng.nextInt(40)));
 
+      final reference = 'LG-${nextNumber + i}';
       final delivery = Delivery(
         id: uuid.v4(),
-        reference: 'LG-${nextNumber + i}',
+        reference: reference,
         customerName: customer,
         address: address,
         latitude: point.latitude,
@@ -250,12 +256,34 @@ class SeedData {
         scheduledFor: slot,
         notes: _notes[rng.nextInt(_notes.length)],
         parcelCount: residential ? 1 : rng.nextInt(8) + 1,
+        barcode: _barcodeFor(reference, nextNumber + i),
+        customerPhone: rng.nextInt(3) == 0
+            ? null
+            : _phoneFor(nextNumber + i, residential: residential),
       );
       await repository.saveDelivery(delivery);
       created.add(delivery);
     }
 
     return created;
+  }
+
+  /// A parcel label for a seeded stop.
+  ///
+  /// Shaped like a courier barcode — two letters and a long numeric run — so
+  /// scanning the seeded manifest exercises the same path a real label would.
+  /// Derived from the reference rather than random, so the same stop always
+  /// carries the same label.
+  static String _barcodeFor(String reference, int seed) {
+    final digits = reference.replaceAll(RegExp(r'\D'), '');
+    return 'JD$digits${(seed * 7919 % 1000000).toString().padLeft(6, '0')}';
+  }
+
+  /// Numbers come from the ranges reserved for fiction (07700 900xxx and
+  /// 020 7946 0xxx), so a seeded manifest can never dial a real person.
+  static String _phoneFor(int seed, {bool residential = false}) {
+    final tail = (seed * 137 % 1000).toString().padLeft(3, '0');
+    return residential ? '07700 900$tail' : '020 7946 0$tail';
   }
 
   /// Shifts [from] by a ground distance in kilometres. Accurate enough over the

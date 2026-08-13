@@ -22,6 +22,11 @@
          fully on a phone with no NFC at all. -->
     <uses-permission android:name="android.permission.NFC"/>
 
+    <!-- Reading parcel barcodes. Proof photos go through the system camera
+         app and need no permission of their own; scanning draws the preview
+         inside this app, which does. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+
     <!-- GPS-only devices; the app still runs without hardware GPS. -->
     <uses-feature android:name="android.hardware.location.gps" android:required="false"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
@@ -82,6 +87,15 @@
         </intent>
         <intent>
             <action android:name="android.media.action.IMAGE_CAPTURE"/>
+        </intent>
+        <!-- Calling and texting a customer from their stop. -->
+        <intent>
+            <action android:name="android.intent.action.DIAL"/>
+            <data android:scheme="tel"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SENDTO"/>
+            <data android:scheme="smsto"/>
         </intent>
     </queries>
 </manifest>

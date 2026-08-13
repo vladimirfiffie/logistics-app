@@ -70,26 +70,32 @@ final releaseNotes = <ReleaseNote>[
   ReleaseNote(
     version: '1.0.0-beta.6',
     date: DateTime.utc(2026, 8, 12),
-    headline: 'More screen, greener ticks, and settings you can find.',
+    headline: 'Scan the parcel, chase the failed drop, count the money.',
     highlights: [
       ReleaseChange(
-        'Every page starts at the top',
-        'The big title bar above each tab is gone, and with it the grey slab '
-            'that slid in the moment you dragged the page. The screen is for '
-            'your round, not for a word already printed on the tab underneath.',
+        'Scan the parcel, find the stop',
+        'Point the camera at a label and land on its stop — no reading a '
+            'reference off the screen with a box in each hand. At the door, '
+            'scan the parcels off one by one so you know all six went in.',
       ),
       ReleaseChange(
-        'History, rebuilt',
-        'Grouped under Today and Yesterday, with a card for how the day went '
-            'and a card per stop carrying the outcome, the time, who signed '
-            'for it and how far you drove to get there.',
+        'A failed stop goes somewhere',
+        'Say what happens to it: carded and back tomorrow morning, another go '
+            'in two hours, or back to the depot. The first two put it on your '
+            'run again as a second attempt, and the failed one stays in your '
+            'history.',
       ),
       ReleaseChange(
-        'Delivered is green',
-        'A closed-out stop was coming out purple, orange or red depending on '
-            'your accent colour. Green means delivered now — on the chip, on '
-            'the stop, in history and on your timesheet — whatever theme you '
-            'run.',
+        'What the day was worth',
+        'Put in an hourly rate and a rate per mile, and your timesheet adds '
+            'up the hours, the mileage claim and the total for each week. '
+            'Leave them empty and no money appears anywhere.',
+      ),
+      ReleaseChange(
+        'Call or text the customer',
+        'A number on the stop, with a button to ring it and a button that '
+            'opens a message already written. Sending it is your tap — the '
+            'app never messages anyone on its own.',
       ),
       ReleaseChange(
         'Settings you can find',
@@ -98,19 +104,19 @@ final releaseNotes = <ReleaseNote>[
             'usually no longer means opening anything.',
       ),
       ReleaseChange(
-        'Writing a van tag shows its working',
-        'Tapping "write a van tag" opens the same reader you clock on with: '
-            'hold the sticker there, and it tells you the tag is ready, or '
-            'that this particular tag will never work and why.',
-      ),
-      ReleaseChange(
-        'Just the map',
-        'Long press the live map to clear everything off it, and long press '
-            'again to bring it back. Useful on a windscreen mount, where the '
-            'panel covers the road you are looking at.',
+        'History, rebuilt',
+        'Grouped under Today and Yesterday, with a card for how the day went, '
+            'a card per stop, and a search across references, customers, '
+            'streets, labels and who signed.',
       ),
     ],
     fixes: [
+      ReleaseChange(
+        'Starting a stop checks the clock',
+        'It began recording whether or not you had clocked on, so the '
+            'distance was kept and the hours were not. It now offers to clock '
+            'you on first — or to carry on without, if that is what you meant.',
+      ),
       ReleaseChange(
         'No grey bar on a pull-down',
         'Dragging any page down slid a grey block in behind the title. It was '
@@ -124,6 +130,24 @@ final releaseNotes = <ReleaseNote>[
       ),
     ],
     minor: [
+      'The big title bar above each tab is gone, and with it the grey slab '
+          'that slid in the moment you dragged a page.',
+      'Delivered stops are green in every theme. They were coming out purple, '
+          'orange or red depending on your accent colour.',
+      'Best route no longer jumps a time slot: it only reorders stops booked '
+          'for the same window, and it unpicks the doubling-back the old '
+          'ordering was prone to.',
+      'Setup ends with a page listing your name, van, theme and units, and '
+          'takes you back to any of them with a tap.',
+      'Pick light, dark or follow-my-phone during setup rather than hunting '
+          'for it afterwards.',
+      'Writing a van tag opens the reader you clock on with, and says whether '
+          'the tag is ready or will never work.',
+      'Long press the live map to clear everything off it, and again to bring '
+          'it back — worth having on a windscreen mount.',
+      'The home screen holds back the progress ring and the day\'s figures '
+          'until there is a day to report, so first thing in the morning it '
+          'shows your shift and your next stop.',
       'Units are called Metric and Imperial, in setup and in Settings, rather '
           'than "km / km-h" and "mi / mph".',
       'Setup says what your unit choice does to the weather card as you pick '

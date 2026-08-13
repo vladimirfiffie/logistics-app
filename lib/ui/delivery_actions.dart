@@ -10,6 +10,7 @@ import '../state/tracking_controller.dart';
 import 'complete_delivery_sheet.dart';
 import 'delivery_outcome_sheet.dart';
 import 'failure_reason_sheet.dart';
+import 'formatters.dart';
 
 /// Closing out a stop is reachable from the detail sheet, the live tracking
 /// view and the home tab, and all of them have to end the trip before writing
@@ -38,6 +39,7 @@ Future<bool> completeDelivery(BuildContext context, Delivery delivery) async {
     recipientName: proof.recipientName,
     proofPhotoPath: proof.photoPath,
     signaturePath: proof.signaturePath,
+    parcelsScanned: proof.parcelsScanned,
   );
   await AppHaptics.delivered();
 
@@ -102,16 +104,37 @@ Future<void> _startNext(BuildContext context, Delivery? next) async {
 /// Records a stop that could not be completed. Returns true if a reason was
 /// captured.
 Future<bool> failDelivery(BuildContext context, Delivery delivery) async {
-  final reason = await FailureReasonSheet.show(context);
-  if (reason == null || !context.mounted) return false;
+  final outcome = await FailureReasonSheet.show(context);
+  if (outcome == null || !context.mounted) return false;
 
+  final reason = outcome.reason;
   final settings = context.read<SettingsController>().settings;
   final deliveries = context.read<DeliveryController>();
   final repository = context.read<DeliveryRepository>();
+  final messenger = ScaffoldMessenger.of(context);
 
   await _endTripFor(context, delivery);
-  await deliveries.markFailed(delivery, reason: reason);
+  final retry = await deliveries.markFailed(
+    delivery,
+    reason: reason,
+    action: outcome.action,
+  );
   await AppHaptics.deliveryFailed();
+
+  // Raising a follow-up quietly would be worse than not raising one: the
+  // driver has to know whether the parcel is on the van tomorrow or going
+  // back tonight.
+  if (retry != null) {
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          '${delivery.reference} is back on the run for '
+          '${formatDateTime(retry.scheduledFor)}, attempt ${retry.attempt}.',
+        ),
+        duration: const Duration(seconds: 5),
+      ),
+    );
+  }
 
   if (!settings.celebrateDeliveries || !context.mounted) return true;
 

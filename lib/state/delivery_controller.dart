@@ -73,6 +73,7 @@ class DeliveryController extends ChangeNotifier {
     String? recipientName,
     String? proofPhotoPath,
     String? signaturePath,
+    int? parcelsScanned,
   }) async {
     await _save(
       delivery.copyWith(
@@ -81,19 +82,56 @@ class DeliveryController extends ChangeNotifier {
         recipientName: recipientName,
         proofPhotoPath: proofPhotoPath,
         signaturePath: signaturePath,
+        parcelsScanned: parcelsScanned,
       ),
     );
   }
 
-  Future<void> markFailed(Delivery delivery, {required String reason}) async {
-    await _save(
+  /// Records a failed attempt, and raises the follow-up stop when the driver
+  /// said the parcel is going back to the door.
+  ///
+  /// Returns the follow-up, or null when the parcel is going back to the
+  /// depot — the caller says so out loud, since "failed" and "failed, back
+  /// tomorrow at nine" are very different outcomes to walk away from.
+  Future<Delivery?> markFailed(
+    Delivery delivery, {
+    required String reason,
+    FailureAction action = FailureAction.returnToDepot,
+  }) async {
+    final failedAt = DateTime.now();
+    await _repository.saveDelivery(
       delivery.copyWith(
         status: DeliveryStatus.failed,
-        completedAt: DateTime.now(),
+        completedAt: failedAt,
         failureReason: reason,
+        failureAction: action,
       ),
     );
+
+    Delivery? next;
+    if (action.retries) {
+      next = await _repository.raiseNextAttempt(
+        delivery,
+        scheduledFor: action.nextAttemptAfter(failedAt),
+      );
+    }
+
+    await refresh();
+    return next;
   }
+
+  /// Records that [scanned] parcels have been read off at the door.
+  Future<void> recordParcelsScanned(Delivery delivery, int scanned) async {
+    final capped = scanned.clamp(0, delivery.parcelCount);
+    if (capped == delivery.parcelsScanned) return;
+    await _save(delivery.copyWith(parcelsScanned: capped));
+  }
+
+  /// The stop a scanned label belongs to, or null if it is not on the
+  /// manifest. Reads through the repository rather than the loaded list so a
+  /// stop added since the last refresh is still found.
+  Future<Delivery?> findByBarcode(String barcode) =>
+      _repository.findByBarcode(barcode);
 
   Future<void> _save(Delivery delivery) async {
     await _repository.saveDelivery(delivery);
