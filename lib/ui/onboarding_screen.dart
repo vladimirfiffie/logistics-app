@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../models/app_settings.dart';
 import '../services/app_haptics.dart';
+import '../services/location_service.dart';
 import '../services/nfc_service.dart';
 import '../state/settings_controller.dart';
 import 'nfc_scan_sheet.dart';
@@ -589,11 +590,38 @@ class _PreferencesPage extends StatelessWidget {
 /// driver has by then swiped past the two fields and the three toggles they
 /// filled in. This is the chance to notice the van is blank or the units are
 /// wrong while it still costs one tap to fix.
-class _ReviewPage extends StatelessWidget {
+class _ReviewPage extends StatefulWidget {
   const _ReviewPage({required this.onEditVan, required this.onEditPreferences});
 
   final VoidCallback onEditVan;
   final VoidCallback onEditPreferences;
+
+  @override
+  State<_ReviewPage> createState() => _ReviewPageState();
+}
+
+class _ReviewPageState extends State<_ReviewPage> {
+  /// Null until the phone has been asked.
+  bool? _batteryOptimised;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkBattery();
+  }
+
+  Future<void> _checkBattery() async {
+    final optimised = await context
+        .read<LocationService>()
+        .isBatteryOptimised();
+    if (mounted) setState(() => _batteryOptimised = optimised);
+  }
+
+  Future<void> _fixBattery() async {
+    AppHaptics.select();
+    await context.read<LocationService>().requestBatteryExemption();
+    await _checkBattery();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -612,20 +640,20 @@ class _ReviewPage extends StatelessWidget {
           label: 'Your name',
           value: settings.driverName,
           empty: 'Not set — no greeting by name',
-          onTap: onEditVan,
+          onTap: widget.onEditVan,
         ),
         _ReviewRow(
           icon: Icons.local_shipping_outlined,
           label: 'Van or round',
           value: settings.vehicleLabel,
           empty: 'Not set',
-          onTap: onEditVan,
+          onTap: widget.onEditVan,
         ),
         _ReviewRow(
           icon: settings.theme.icon,
           label: 'Theme',
           value: settings.theme.label,
-          onTap: onEditPreferences,
+          onTap: widget.onEditPreferences,
         ),
         _ReviewRow(
           icon: Icons.straighten,
@@ -633,14 +661,49 @@ class _ReviewPage extends StatelessWidget {
           value:
               '${settings.distanceUnit.label} · '
               '${settings.distanceUnit.detail.toLowerCase()}',
-          onTap: onEditPreferences,
+          onTap: widget.onEditPreferences,
         ),
         _ReviewRow(
           icon: Icons.vibration,
           label: 'Haptics',
           value: settings.hapticsEnabled ? 'On' : 'Off',
-          onTap: onEditPreferences,
+          onTap: widget.onEditPreferences,
         ),
+        // The commonest reason a recorded trail comes back with holes in it
+        // is not a permission at all — it is the phone's battery manager
+        // stopping a backgrounded app. Worth a tap now rather than a lost
+        // round later, and it is the one piece of setup a driver would never
+        // think to go looking for.
+        if (_batteryOptimised ?? false) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.errorContainer,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.battery_alert,
+                  color: theme.colorScheme.onErrorContainer,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'This phone is battery-managing apps, which can stop '
+                    'tracking while it is in your pocket.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onErrorContainer,
+                    ),
+                  ),
+                ),
+                TextButton(onPressed: _fixBattery, child: const Text('Fix')),
+              ],
+            ),
+          ),
+        ],
+
         const SizedBox(height: 8),
         // Says what the button underneath is about to do. Android's own
         // dialog will not.

@@ -1,5 +1,6 @@
-import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+
+import 'fix.dart';
 
 /// One GPS breadcrumb recorded during a [Trip].
 class TripPoint {
@@ -34,7 +35,7 @@ class TripPoint {
 
   LatLng get latLng => LatLng(latitude, longitude);
 
-  factory TripPoint.fromPosition(String tripId, Position position) => TripPoint(
+  factory TripPoint.fromFix(String tripId, Fix position) => TripPoint(
     tripId: tripId,
     latitude: position.latitude,
     longitude: position.longitude,

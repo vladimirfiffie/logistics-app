@@ -1,9 +1,9 @@
 import 'dart:async';
 
-import 'package:geolocator/geolocator.dart';
 import 'package:logistics_app/data/delivery_repository.dart';
 import 'package:logistics_app/models/app_settings.dart';
 import 'package:logistics_app/models/delivery.dart';
+import 'package:logistics_app/models/fix.dart';
 import 'package:logistics_app/models/shift.dart';
 import 'package:logistics_app/models/shift_break.dart';
 import 'package:logistics_app/models/trip.dart';
@@ -288,16 +288,21 @@ class FakeLocationService implements LocationService {
   final double segmentMeters;
   bool backgroundGranted;
 
-  final _positions = StreamController<Position>.broadcast();
+  final _positions = StreamController<Fix>.broadcast();
   int settingsOpened = 0;
   int locationSettingsOpened = 0;
   String? lastNotificationText;
 
-  void emit(Position position) => _positions.add(position);
+  void emit(Fix position) => _positions.add(position);
 
   void emitError(Object error) => _positions.addError(error);
 
-  Future<void> dispose() => _positions.close();
+  Future<void> dispose() async {
+    await _positions.close();
+    await _arrivals.close();
+    await _providers.close();
+    await _motion.close();
+  }
 
   @override
   Future<LocationReadiness> ensureReady() async => readiness;
@@ -327,16 +332,16 @@ class FakeLocationService implements LocationService {
   }
 
   @override
-  Future<Position> currentPosition() async => makePosition();
+  Future<Fix> currentPosition() async => makePosition();
 
   @override
-  Future<Position?> lastKnownPosition() async => null;
+  Future<Fix?> lastKnownPosition() async => null;
 
   /// The accuracy the controller asked for on the most recent start.
   TrackingAccuracy? lastAccuracy;
 
   @override
-  Stream<Position> trackPosition({
+  Stream<Fix> trackPosition({
     required String notificationText,
     TrackingAccuracy accuracy = TrackingAccuracy.balanced,
   }) {
@@ -344,6 +349,58 @@ class FakeLocationService implements LocationService {
     lastAccuracy = accuracy;
     return _positions.stream;
   }
+
+  /// Whether the device's location providers are on, and a way for a test to
+  /// switch them off mid-trip.
+  final _providers = StreamController<bool>.broadcast();
+
+  void setLocationEnabled(bool enabled) => _providers.add(enabled);
+
+  @override
+  Stream<bool> get locationEnabled => _providers.stream;
+
+  final _motion = StreamController<MotionState>.broadcast();
+
+  void setMotion(MotionState state) => _motion.add(state);
+
+  @override
+  Stream<MotionState> get motion => _motion.stream;
+
+  /// Whether the fake device is battery-managed.
+  bool batteryOptimised = false;
+
+  @override
+  Future<bool> isBatteryOptimised() async => batteryOptimised;
+
+  @override
+  Future<bool> requestBatteryExemption() async {
+    batteryOptimised = false;
+    return true;
+  }
+
+  /// Stops the fake was asked to watch, and a way for a test to fire one.
+  final watched = <String>{};
+  final _arrivals = StreamController<String>.broadcast();
+
+  void arriveAt(String id) => _arrivals.add(id);
+
+  @override
+  Future<void> watchArrival({
+    required String id,
+    required double latitude,
+    required double longitude,
+    required double radiusMeters,
+  }) async {
+    watched.add(id);
+  }
+
+  @override
+  Future<void> stopWatchingArrival(String id) async {
+    watched.remove(id);
+  }
+
+  @override
+  Stream<String> get arrivals => _arrivals.stream;
 
   @override
   double distanceBetween(
@@ -354,24 +411,21 @@ class FakeLocationService implements LocationService {
   ) => segmentMeters;
 }
 
-/// Builds a [Position] without needing a device.
-Position makePosition({
+/// Builds a [Fix] without needing a device.
+Fix makePosition({
   double latitude = 51.5,
   double longitude = -0.12,
   double accuracy = 5,
   double speed = 10,
   DateTime? timestamp,
-}) => Position(
+}) => Fix(
   latitude: latitude,
   longitude: longitude,
   timestamp: timestamp ?? DateTime(2026, 8, 11, 9),
   accuracy: accuracy,
   altitude: 25,
-  altitudeAccuracy: 3,
   heading: 90,
-  headingAccuracy: 5,
   speed: speed,
-  speedAccuracy: 1,
 );
 
 TripPoint makeTripPoint(

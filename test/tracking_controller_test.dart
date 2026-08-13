@@ -212,6 +212,49 @@ void main() {
       expect(restarted, isTrue);
     });
 
+    test('hands the stop to the system to watch, and takes it back', () async {
+      final delivery = makeDelivery();
+      await repository.saveDelivery(delivery);
+
+      await controller.start(delivery);
+      // Android throttles a backgrounded app's fixes; a watched region is
+      // checked by the platform whatever it is doing to this app.
+      expect(location.watched, contains('d1'));
+
+      await controller.stop();
+      // Left registered, the OS would wake the app about a stop that was
+      // closed out days ago.
+      expect(location.watched, isEmpty);
+    });
+
+    test('the system noticing arrival is enough to announce it', () async {
+      final delivery = makeDelivery();
+      await repository.saveDelivery(delivery);
+      await controller.start(delivery);
+
+      // No fix has been anywhere near the stop — this is the case where the
+      // app is starved of updates and the region trigger is the only signal.
+      location.arriveAt('d1');
+      await pumpEventQueue();
+
+      // Announced once and latched: a fix landing inside the radius
+      // afterwards must not produce a second notification.
+      await controller.stop();
+      expect(controller.error, isNull);
+    });
+
+    test('a region trigger for a different stop is ignored', () async {
+      final delivery = makeDelivery();
+      await repository.saveDelivery(delivery);
+      await controller.start(delivery);
+
+      location.arriveAt('some-other-stop');
+      await pumpEventQueue();
+
+      expect(controller.error, isNull);
+      expect(controller.isTracking, isTrue);
+    });
+
     test('clear() only drops a finished trip', () async {
       final delivery = makeDelivery();
       await repository.saveDelivery(delivery);

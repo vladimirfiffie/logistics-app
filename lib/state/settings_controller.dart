@@ -33,6 +33,7 @@ class SettingsController extends ChangeNotifier {
   static const _driverNameKey = 'settings.driver_name';
   static const _vehicleKey = 'settings.vehicle_label';
   static const _followKey = 'settings.follow_mode';
+  static const _orientationKey = 'settings.map_orientation';
   static const _celebrateKey = 'settings.celebrate_deliveries';
   static const _requirePhotoKey = 'settings.require_proof_photo';
   static const _arrivalAlertsKey = 'settings.arrival_alerts';
@@ -92,6 +93,11 @@ class SettingsController extends ChangeNotifier {
         prefs.getString(_followKey),
         MapFollowMode.values,
         MapFollowMode.follow,
+      ),
+      mapOrientation: _readEnum(
+        prefs.getString(_orientationKey),
+        MapOrientation.values,
+        MapOrientation.northUp,
       ),
       celebrateDeliveries: prefs.getBool(_celebrateKey) ?? true,
       requireProofPhoto: prefs.getBool(_requirePhotoKey) ?? false,
@@ -314,6 +320,12 @@ class SettingsController extends ChangeNotifier {
     });
   }
 
+  Future<void> setMapOrientation(MapOrientation value) async {
+    await _update(_settings.copyWith(mapOrientation: value), (prefs) {
+      return prefs.setString(_orientationKey, value.name);
+    });
+  }
+
   Future<void> setCurrency(Currency value) async {
     await _update(_settings.copyWith(currency: value), (prefs) {
       return prefs.setString(_currencyKey, value.name);
@@ -351,6 +363,7 @@ class SettingsController extends ChangeNotifier {
       _driverNameKey,
       _vehicleKey,
       _followKey,
+      _orientationKey,
       _celebrateKey,
       _requirePhotoKey,
       _arrivalAlertsKey,

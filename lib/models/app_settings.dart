@@ -184,9 +184,15 @@ enum TrackingAccuracy {
   final String detail;
 
   /// Metres the driver must move before a new fix is emitted.
+  ///
+  /// Descriptive rather than dialled in directly: the location plugin tunes
+  /// the GPS through its own presets, which adapt to whether the van is
+  /// moving and whether the app is in the foreground. These numbers say what
+  /// each choice is *for*, and are what the tests hold the ordering of the
+  /// three levels against.
   final int distanceFilterMeters;
 
-  /// Android's requested interval between fixes.
+  /// Roughly how often a fix is wanted, at this level.
   final int intervalSeconds;
 
   Duration get interval => Duration(seconds: intervalSeconds);
@@ -254,6 +260,20 @@ enum MapFollowMode {
   final String detail;
 }
 
+/// Which way is up on the live map.
+enum MapOrientation {
+  northUp('North up', 'The map stays square, like a paper map.'),
+  courseUp(
+    'Course up',
+    'The map turns as you drive, so the way ahead is up the screen.',
+  );
+
+  const MapOrientation(this.label, this.detail);
+
+  final String label;
+  final String detail;
+}
+
 /// Everything the driver can change. Immutable; [copyWith] produces the next
 /// value and the controller persists it.
 @immutable
@@ -270,6 +290,7 @@ class AppSettings {
     this.driverName = '',
     this.vehicleLabel = '',
     this.followMode = MapFollowMode.follow,
+    this.mapOrientation = MapOrientation.northUp,
     this.celebrateDeliveries = true,
     this.requireProofPhoto = false,
     this.arrivalAlerts = true,
@@ -322,6 +343,9 @@ class AppSettings {
 
   /// Whether the live map starts out following the driver.
   final MapFollowMode followMode;
+
+  /// Whether the live map is drawn north-up or turned to the driver's course.
+  final MapOrientation mapOrientation;
 
   /// Show the success animation after a delivery. On by default, but it is a
   /// couple of seconds a driver doing eighty drops a day may not want.
@@ -442,6 +466,7 @@ class AppSettings {
     String? driverName,
     String? vehicleLabel,
     MapFollowMode? followMode,
+    MapOrientation? mapOrientation,
     bool? celebrateDeliveries,
     bool? requireProofPhoto,
     bool? arrivalAlerts,
@@ -473,6 +498,7 @@ class AppSettings {
     driverName: driverName ?? this.driverName,
     vehicleLabel: vehicleLabel ?? this.vehicleLabel,
     followMode: followMode ?? this.followMode,
+    mapOrientation: mapOrientation ?? this.mapOrientation,
     celebrateDeliveries: celebrateDeliveries ?? this.celebrateDeliveries,
     requireProofPhoto: requireProofPhoto ?? this.requireProofPhoto,
     arrivalAlerts: arrivalAlerts ?? this.arrivalAlerts,
@@ -508,6 +534,7 @@ class AppSettings {
       other.driverName == driverName &&
       other.vehicleLabel == vehicleLabel &&
       other.followMode == followMode &&
+      other.mapOrientation == mapOrientation &&
       other.celebrateDeliveries == celebrateDeliveries &&
       other.requireProofPhoto == requireProofPhoto &&
       other.arrivalAlerts == arrivalAlerts &&
@@ -541,6 +568,7 @@ class AppSettings {
     driverName,
     vehicleLabel,
     followMode,
+    mapOrientation,
     celebrateDeliveries,
     requireProofPhoto,
     arrivalAlerts,

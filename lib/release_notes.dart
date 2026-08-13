@@ -68,6 +68,59 @@ class ReleaseNote {
 /// back into the last one.
 final releaseNotes = <ReleaseNote>[
   ReleaseNote(
+    version: '1.0.0-beta.10',
+    date: DateTime.utc(2026, 8, 13),
+    headline: 'A map that turns with you, and tracking that holds on.',
+    highlights: [
+      ReleaseChange(
+        'The map turns with you',
+        'The live map can face the way you are driving instead of always '
+            'facing north, with you drawn as an arrow rather than a dot. The '
+            'compass button switches it mid-round; Settings sets which way it '
+            'starts.',
+      ),
+      ReleaseChange(
+        'Which way the stop is',
+        'A line from you to the address, and the panel says it out loud — '
+            '"the stop is ahead and to your right" — turned to the way you '
+            'are facing rather than to north.',
+      ),
+      ReleaseChange(
+        'Tracking without Google',
+        'Location now runs on Android\'s own service rather than Google Play '
+            'Services, so the app works on a degoogled phone — and arrival '
+            'alerts are handed to the system, which means they still fire '
+            'when Android has stopped giving this app updates.',
+      ),
+      ReleaseChange(
+        'It says when it cannot record',
+        'If location gets switched off mid-trip, the panel says so instead of '
+            'quietly recording nothing. A trail that stops growing looks '
+            'exactly like a tunnel until you check it at midnight.',
+      ),
+      ReleaseChange(
+        'Battery managers get caught early',
+        'The commonest reason a recorded trail has holes in it is your phone '
+            'putting the app to sleep. Setup and Settings now both check, and '
+            'fix it in one tap.',
+      ),
+      ReleaseChange(
+        'Start recording from the live view',
+        'Stopping used to be a one-way door — you had to go back to the '
+            'manifest to pick the stop up again. There is a start button next '
+            'to it now.',
+      ),
+    ],
+    minor: [
+      'The slide to complete a delivery turns its arrow into a tick as you '
+          'slide it.',
+      'Home lists the next three stops and hands the rest to the manifest, '
+          'rather than repeating the whole round.',
+      'Distances are measured by the app itself now, to the same figures as '
+          'before.',
+    ],
+  ),
+  ReleaseNote(
     version: '1.0.0-beta.9',
     date: DateTime.utc(2026, 8, 12),
     headline: 'Scan a whole load, and see what actually happened at the door.',

@@ -1,22 +1,25 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
-import 'package:haptic_kit/haptic_kit.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../models/app_settings.dart';
 import '../models/delivery.dart';
+import '../models/fix.dart';
 import '../services/app_haptics.dart';
 import '../services/location_service.dart';
 import '../state/tracking_controller.dart';
 import '../state/settings_controller.dart';
+import '../services/bearing.dart';
 import 'delivery_actions.dart';
 import 'formatters.dart';
+import 'shift_actions.dart';
 import 'widgets/app_sheet.dart';
 import 'widgets/outcome_colors.dart';
+import 'widgets/slide_to_arrive.dart';
 import 'widgets/stat_tile.dart';
 import 'widgets/trip_map.dart';
 
@@ -57,6 +60,10 @@ class _LiveTabState extends State<LiveTab> {
 
   /// Which trip [_openedOnArrival] belongs to.
   String? _armedTripId;
+
+  /// Map turned so the way the driver is going is up the screen. Seeded from
+  /// their setting, and toggled from the compass button for one round.
+  bool _courseUp = false;
   bool _backgroundPermissionGranted = true;
   int _seenFixes = 0;
   int _recentreRequests = 0;
@@ -64,7 +71,7 @@ class _LiveTabState extends State<LiveTab> {
   /// Lets us re-arm the slide handle when the driver backs out of the
   /// completion sheet. Without this the handle stays latched at the end after
   /// a successful slide and the stop can never be completed again.
-  final _slideKey = GlobalKey<SlideToConfirmState>();
+  final _slideKey = GlobalKey<SlideToArriveState>();
   bool _wakelockOn = false;
   TrackingController? _tracking;
 
@@ -76,9 +83,9 @@ class _LiveTabState extends State<LiveTab> {
         setState(() {});
       }
     });
-    _followDriver =
-        context.read<SettingsController>().settings.followMode ==
-        MapFollowMode.follow;
+    final settings = context.read<SettingsController>().settings;
+    _followDriver = settings.followMode == MapFollowMode.follow;
+    _courseUp = settings.mapOrientation == MapOrientation.courseUp;
     _checkBackgroundPermission();
     _tracking = context.read<TrackingController>()..addListener(_onTracking);
   }
@@ -120,6 +127,91 @@ class _LiveTabState extends State<LiveTab> {
   void _togglePanel() {
     AppHaptics.select();
     setState(() => _panelCollapsed = !_panelCollapsed);
+  }
+
+  /// North-up or course-up, for this round. The setting is the default; this
+  /// is the driver changing their mind halfway down a lane.
+  void _toggleOrientation() {
+    AppHaptics.select();
+    setState(() => _courseUp = !_courseUp);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          _courseUp
+              ? 'The map now turns with you.'
+              : 'The map is back to north up.',
+        ),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  /// Starts recording again for the stop already on screen.
+  ///
+  /// The live view could stop a recording and never start one: a driver who
+  /// stopped by mistake, or stopped to nip into a depot, had to go back to
+  /// the manifest and find the stop again. It asks first for the same reason
+  /// stopping does — it turns the GPS back on.
+  Future<void> _startRecording(Delivery delivery) async {
+    final confirmed = await showAppSheet<bool>(
+      context,
+      builder: (sheetContext) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SheetHeader(
+              title: 'Start recording again?',
+              subtitle:
+                  '${delivery.reference} · ${delivery.customerName}. Your '
+                  'route and your position are recorded on this phone until '
+                  'you stop or close the stop out.',
+              icon: Icons.play_circle_outline,
+            ),
+            const SizedBox(height: 22),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(sheetContext).pop(true),
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('Start recording'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(sheetContext).pop(false),
+              child: const Text('Not now'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    // The same check the manifest makes: recording against no shift keeps the
+    // distance and loses the hours.
+    if (!await ensureOnShift(context) || !mounted) return;
+
+    final tracking = context.read<TrackingController>();
+    final messenger = ScaffoldMessenger.of(context);
+    final started = await tracking.start(delivery);
+
+    if (started) {
+      await AppHaptics.trackingStarted();
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('Recording ${delivery.customerName} again.')),
+      );
+      return;
+    }
+
+    await AppHaptics.error();
+    if (!mounted) return;
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(tracking.error?.toString() ?? tracking.readiness.message),
+      ),
+    );
   }
 
   /// Long press hides the chrome; long press again brings it back. Announced
@@ -285,6 +377,11 @@ class _LiveTabState extends State<LiveTab> {
               followDriver: _followDriver,
               recentreRequest: _recentreRequests,
               onLongPress: _toggleChrome,
+              headingDegrees: tracking.headingDegrees,
+              courseUp: _courseUp,
+              // Only while the trip is live: a straight line to a stop you
+              // have already closed out is noise.
+              showBearingLine: tracking.isTracking,
             ),
           ),
 
@@ -318,17 +415,36 @@ class _LiveTabState extends State<LiveTab> {
                       alignment: Alignment.centerRight,
                       child: Padding(
                         padding: const EdgeInsets.only(right: 12, bottom: 8),
-                        child: FloatingActionButton.small(
-                          heroTag: 'follow',
-                          onPressed: () => _recentre(hasFix: current != null),
-                          tooltip: _followDriver
-                              ? 'Recentre'
-                              : 'Follow my position',
-                          child: Icon(
-                            _followDriver
-                                ? Icons.gps_fixed
-                                : Icons.gps_not_fixed,
-                          ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            FloatingActionButton.small(
+                              heroTag: 'orientation',
+                              onPressed: _toggleOrientation,
+                              tooltip: _courseUp
+                                  ? 'Face the map north'
+                                  : 'Turn the map with me',
+                              child: Icon(
+                                _courseUp
+                                    ? Icons.navigation
+                                    : Icons.explore_outlined,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            FloatingActionButton.small(
+                              heroTag: 'follow',
+                              onPressed: () =>
+                                  _recentre(hasFix: current != null),
+                              tooltip: _followDriver
+                                  ? 'Recentre'
+                                  : 'Follow my position',
+                              child: Icon(
+                                _followDriver
+                                    ? Icons.gps_fixed
+                                    : Icons.gps_not_fixed,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -341,6 +457,7 @@ class _LiveTabState extends State<LiveTab> {
                       onArrived: () => _arrived(delivery),
                       onFailed: () => failDelivery(context, delivery),
                       onEndTrip: _stopRecording,
+                      onStartTrip: () => _startRecording(delivery),
                     ),
                   ],
                 ),
@@ -439,6 +556,63 @@ class _DestinationBanner extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Which way the stop is from here.
+///
+/// An arrow that points at the address, turned relative to the way the driver
+/// is facing, and the same thing said in words. Not a route: there is no road
+/// network behind it, and the wording is deliberately vague enough that it
+/// cannot be mistaken for one.
+class _DirectionLine extends StatelessWidget {
+  const _DirectionLine({required this.bearing, required this.relative});
+
+  /// Clockwise from true north.
+  final double? bearing;
+
+  /// Relative to the driver's heading, when they are moving fast enough for
+  /// the GPS to have one.
+  final double? relative;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final heading = bearing;
+    if (heading == null) return const SizedBox.shrink();
+
+    // Pointed relative to the driver when their heading is known, and at true
+    // north when it is not — a stationary van gets a compass, not a lie about
+    // which way it is facing.
+    final turn = relative ?? heading;
+
+    return Row(
+      children: [
+        Transform.rotate(
+          angle: turn * math.pi / 180,
+          child: Icon(Icons.arrow_upward, size: 20, color: scheme.primary),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            relative == null
+                ? 'The stop is ${compassPoint(heading)} of you'
+                : 'The stop is ${describeRelative(relative!)}',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        Text(
+          compassPoint(heading),
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: scheme.onSurfaceVariant,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -616,6 +790,7 @@ class _TripPanel extends StatelessWidget {
     required this.onArrived,
     required this.onFailed,
     required this.onEndTrip,
+    required this.onStartTrip,
   });
 
   final TrackingController tracking;
@@ -625,10 +800,13 @@ class _TripPanel extends StatelessWidget {
   final bool collapsed;
 
   final VoidCallback onToggleCollapsed;
-  final GlobalKey<SlideToConfirmState> slideKey;
+  final GlobalKey<SlideToArriveState> slideKey;
   final VoidCallback onArrived;
   final VoidCallback onFailed;
   final Future<void> Function() onEndTrip;
+
+  /// Picks the recording back up for the stop already on screen.
+  final VoidCallback onStartTrip;
 
   @override
   Widget build(BuildContext context) {
@@ -666,7 +844,7 @@ class _TripPanel extends StatelessWidget {
     BuildContext context,
     ThemeData theme,
     DistanceUnit unit,
-    Position? fix,
+    Fix? fix,
     double? remaining,
     Duration? eta,
     bool arrived,
@@ -762,6 +940,18 @@ class _TripPanel extends StatelessWidget {
               ),
             ],
           ),
+          // Which way it is, in words. A bearing on its own means nothing at
+          // a junction; "ahead and to your right" is what a passenger would
+          // say, and it is the honest limit of what a straight line to an
+          // address can tell anyone.
+          if (!arrived && remaining != null) ...[
+            const SizedBox(height: 10),
+            _DirectionLine(
+              bearing: tracking.bearingToDestination,
+              relative: tracking.relativeBearingToDestination,
+            ),
+          ],
+
           const SizedBox(height: 12),
           // The second row is instrumentation rather than driving
           // information, so it stands down once the driver is at the door
@@ -795,6 +985,38 @@ class _TripPanel extends StatelessWidget {
                 ),
               ],
             ),
+
+          // Location switched off under a running trip. Without this the trail
+          // just stops growing, which looks exactly like driving through a
+          // tunnel — and the driver finds out at the end of the day.
+          if (tracking.locationTurnedOff && tracking.isTracking) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Icon(
+                  Icons.location_disabled,
+                  size: 16,
+                  color: theme.colorScheme.error,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Location is switched off on this phone. Nothing is being '
+                    'recorded until it goes back on.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.error,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () =>
+                      context.read<LocationService>().openLocationSettings(),
+                  child: const Text('Turn on'),
+                ),
+              ],
+            ),
+          ],
 
           if (fix == null && tracking.isTracking) ...[
             const SizedBox(height: 10),
@@ -857,13 +1079,13 @@ class _TripPanel extends StatelessWidget {
           // and closing out the wrong stop is a nuisance to undo — so the
           // default is a deliberate slide.
           if (context.appSettings.confirmWithSlide)
-            SlideToConfirm(
+            SlideToArrive(
               key: slideKey,
-              label: 'Slide when you have arrived',
-              onConfirmed: tracking.isBusy ? () {} : onArrived,
-              trackColor: theme.colorScheme.surfaceContainerHighest,
-              handleColor: theme.colorScheme.primary,
-              textColor: theme.colorScheme.onSurfaceVariant,
+              label: arrived
+                  ? "You're here — slide to complete"
+                  : 'Slide when you have arrived',
+              enabled: !tracking.isBusy,
+              onConfirmed: onArrived,
             )
           else
             FilledButton.icon(
@@ -890,14 +1112,22 @@ class _TripPanel extends StatelessWidget {
                   ),
                 ),
               ),
+              // Stopping and starting are the same button in two states.
+              // Stopping used to be a one-way door: a driver who stopped by
+              // mistake, or who stopped while nipping into the depot, had to
+              // go back to the manifest and find the stop all over again.
               Expanded(
-                child: TextButton.icon(
-                  onPressed: tracking.isBusy || !tracking.isTracking
-                      ? null
-                      : () => onEndTrip(),
-                  icon: const Icon(Icons.stop_circle_outlined, size: 18),
-                  label: const Text('Stop recording'),
-                ),
+                child: tracking.isTracking
+                    ? TextButton.icon(
+                        onPressed: tracking.isBusy ? null : () => onEndTrip(),
+                        icon: const Icon(Icons.stop_circle_outlined, size: 18),
+                        label: const Text('Stop recording'),
+                      )
+                    : TextButton.icon(
+                        onPressed: tracking.isBusy ? null : onStartTrip,
+                        icon: const Icon(Icons.play_circle_outline, size: 18),
+                        label: const Text('Start recording'),
+                      ),
               ),
             ],
           ),

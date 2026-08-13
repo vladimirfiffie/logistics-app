@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
@@ -44,6 +46,10 @@ class HomeTab extends StatefulWidget {
 }
 
 class _HomeTabState extends State<HomeTab> with WidgetsBindingObserver {
+  /// How many of the remaining stops the home screen lists before handing off
+  /// to the manifest. Three is a glance; a whole round is a second manifest.
+  static const _peekAtUpcoming = 3;
+
   List<Trip> _trips = const [];
   Weather? _weather;
   bool _loadingWeather = false;
@@ -580,19 +586,34 @@ class _HomeTabState extends State<HomeTab> with WidgetsBindingObserver {
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                child: Text(
-                  'COMING UP',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.primary,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.8,
-                  ),
+                child: Row(
+                  children: [
+                    Text(
+                      'COMING UP',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                    const Spacer(),
+                    if (upcoming.length > _peekAtUpcoming)
+                      Text(
+                        '${upcoming.length} left',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ),
 
             SliverList.builder(
-              itemCount: upcoming.length,
+              // Home is a glance, not a second manifest. Fifty stops here was
+              // fifty rows of scrolling past the two cards a driver actually
+              // opens this screen for.
+              itemCount: math.min(upcoming.length, _peekAtUpcoming),
               itemBuilder: (context, index) {
                 final stop = upcoming[index];
                 return ListTile(
@@ -628,6 +649,25 @@ class _HomeTabState extends State<HomeTab> with WidgetsBindingObserver {
                 );
               },
             ),
+
+            // The rest of the round lives on the manifest, which is built for
+            // it — searchable, sortable and route-plannable.
+            if (upcoming.length > _peekAtUpcoming)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+                  child: TextButton.icon(
+                    onPressed: widget.onBrowseManifest,
+                    icon: const Icon(Icons.list_alt, size: 18),
+                    label: Text(
+                      'See all ${upcoming.length + 1} stops on the manifest',
+                    ),
+                    style: TextButton.styleFrom(
+                      minimumSize: const Size.fromHeight(44),
+                    ),
+                  ),
+                ),
+              ),
           ],
 
           const SliverToBoxAdapter(child: SizedBox(height: 28)),

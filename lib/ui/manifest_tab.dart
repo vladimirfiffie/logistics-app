@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
 import '../data/delivery_repository.dart';
 import '../data/seed_data.dart';
 import '../models/app_settings.dart';
+import '../models/fix.dart';
 import '../models/delivery.dart';
 import '../services/app_haptics.dart';
 import '../services/location_service.dart';
@@ -32,7 +32,7 @@ class ManifestTab extends StatefulWidget {
 }
 
 class _ManifestTabState extends State<ManifestTab> {
-  Position? _fix;
+  Fix? _fix;
 
   /// Null until the first build reads the driver's default. Held here rather
   /// than in settings so changing it for one round is not a permanent change.

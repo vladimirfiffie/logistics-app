@@ -617,6 +617,16 @@ class TrackingSettingsPage extends StatelessWidget {
           detailOf: (mode) => mode.detail,
           onChanged: controller.setFollowMode,
         ),
+        _ChoiceTile<MapOrientation>(
+          icon: Icons.explore_outlined,
+          title: 'Map orientation',
+          value: settings.mapOrientation,
+          valueLabel: settings.mapOrientation.label,
+          options: MapOrientation.values,
+          labelOf: (mode) => mode.label,
+          detailOf: (mode) => mode.detail,
+          onChanged: controller.setMapOrientation,
+        ),
       ],
     );
   }
@@ -837,6 +847,7 @@ class PermissionsSettingsPage extends StatefulWidget {
 class _PermissionsSettingsPageState extends State<PermissionsSettingsPage> {
   LocationReadiness? _readiness;
   bool _backgroundGranted = false;
+  bool _batteryOptimised = false;
 
   @override
   void initState() {
@@ -851,16 +862,20 @@ class _PermissionsSettingsPageState extends State<PermissionsSettingsPage> {
     // came to look.
     final readiness = await location.currentReadiness();
     final background = await location.hasBackgroundPermission();
+    final optimised = await location.isBatteryOptimised();
     if (mounted) {
       setState(() {
         _readiness = readiness;
         _backgroundGranted = background;
+        _batteryOptimised = optimised;
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return _SettingsPage(
       title: 'Permissions',
       children: [
@@ -868,6 +883,38 @@ class _PermissionsSettingsPageState extends State<PermissionsSettingsPage> {
           readiness: _readiness,
           backgroundGranted: _backgroundGranted,
           onRefresh: _refresh,
+        ),
+
+        // The commonest reason a recorded trail has holes in it is not a
+        // permission at all: it is an OEM battery manager deciding a
+        // backgrounded app has had enough. Worth surfacing before it costs
+        // someone a round rather than after.
+        ListTile(
+          leading: Icon(
+            _batteryOptimised ? Icons.battery_alert : Icons.battery_full,
+            color: _batteryOptimised ? scheme.error : scheme.primary,
+          ),
+          title: const Text('Battery optimisation'),
+          subtitle: Text(
+            _batteryOptimised
+                ? 'On for this app. Android may stop tracking while your '
+                      'phone is in your pocket — the trail comes back with '
+                      'gaps in it.'
+                : 'Off for this app, so tracking is left alone while you '
+                      'drive.',
+          ),
+          isThreeLine: _batteryOptimised,
+          trailing: _batteryOptimised
+              ? TextButton(
+                  onPressed: () async {
+                    await context
+                        .read<LocationService>()
+                        .requestBatteryExemption();
+                    await _refresh();
+                  },
+                  child: const Text('Fix'),
+                )
+              : null,
         ),
       ],
     );

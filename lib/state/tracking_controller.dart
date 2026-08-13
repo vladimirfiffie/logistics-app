@@ -2,13 +2,14 @@ import 'dart:async';
 import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
-import 'package:geolocator/geolocator.dart';
 
 import '../data/delivery_repository.dart';
 import '../models/app_settings.dart';
 import '../models/delivery.dart';
+import '../models/fix.dart';
 import '../models/trip.dart';
 import '../models/trip_point.dart';
+import '../services/bearing.dart';
 import '../services/location_service.dart';
 import '../services/notification_service.dart';
 
@@ -56,8 +57,20 @@ class TrackingController extends ChangeNotifier {
   /// day, and got slower the longer the driver worked.
   List<TripPoint> _points = [];
   double _distanceMeters = 0;
-  Position? _lastPosition;
-  StreamSubscription<Position>? _subscription;
+  Fix? _lastPosition;
+  StreamSubscription<Fix>? _subscription;
+
+  /// Fires when the *system* sees the driver enter the stop's radius, which
+  /// keeps working while Android is throttling this app's own fixes.
+  StreamSubscription<String>? _arrivals;
+
+  /// Watches for the device's location providers being switched off under a
+  /// running trip.
+  StreamSubscription<bool>? _providers;
+
+  /// Set when location was turned off mid-trip. A trail that flatlines looks
+  /// identical to a trail through a tunnel, so the app has to say which it is.
+  bool _locationTurnedOff = false;
   LocationReadiness _readiness = LocationReadiness.ready;
   Object? _error;
   bool _isBusy = false;
@@ -69,12 +82,16 @@ class TrackingController extends ChangeNotifier {
   /// list would let a caller corrupt the odometer's source data.
   List<TripPoint> get points => UnmodifiableListView(_points);
   double get distanceMeters => _distanceMeters;
-  Position? get lastPosition => _lastPosition;
+  Fix? get lastPosition => _lastPosition;
   LocationReadiness get readiness => _readiness;
   Object? get error => _error;
   bool get isBusy => _isBusy;
 
   bool get isTracking => _trip != null && _trip!.isActive;
+
+  /// True when the phone's location providers went off while recording. The
+  /// trip is still open — nothing is thrown away — but no fixes are arriving.
+  bool get locationTurnedOff => _locationTurnedOff;
 
   Duration get elapsed => _trip?.duration ?? Duration.zero;
 
@@ -126,6 +143,43 @@ class TrackingController extends ChangeNotifier {
     final seconds = remaining / pace;
     if (!seconds.isFinite || seconds > 6 * 60 * 60) return null;
     return Duration(seconds: seconds.round());
+  }
+
+  /// Which way the stop is, in degrees clockwise from true north.
+  double? get bearingToDestination {
+    final position = _lastPosition;
+    final destination = _delivery;
+    if (position == null || destination == null) return null;
+    return bearingDegrees(
+      position.latitude,
+      position.longitude,
+      destination.latitude,
+      destination.longitude,
+    );
+  }
+
+  /// Which way the driver is facing, in degrees clockwise from true north.
+  ///
+  /// Null when standing still: a GPS heading is derived from movement, so a
+  /// parked van reports whatever direction it last happened to be crawling
+  /// in, and a map that swings around while the driver is stationary is worse
+  /// than one that does not turn at all.
+  double? get headingDegrees {
+    final position = _lastPosition;
+    if (position == null) return null;
+    if (position.speed < 1.0) return null;
+    final heading = position.heading;
+    if (heading.isNaN || heading < 0) return null;
+    return heading;
+  }
+
+  /// Where the stop is relative to the way the driver is facing: 0 is dead
+  /// ahead, negative is left. Null until both directions are known.
+  double? get relativeBearingToDestination {
+    final bearing = bearingToDestination;
+    final heading = headingDegrees;
+    if (bearing == null || heading == null) return null;
+    return relativeBearing(bearing, heading);
   }
 
   /// Whether the driver is inside the arrival radius of the stop. Drives the
@@ -214,6 +268,13 @@ class TrackingController extends ChangeNotifier {
       // is worse than a stop that takes an extra moment.
       await _subscription?.cancel();
       _subscription = null;
+      // The watched region goes with the trip it belonged to. Leaving it
+      // registered would have the OS wake the app about a stop that is
+      // already closed out, possibly days later.
+      await _stopWatchingArrival();
+      await _providers?.cancel();
+      _providers = null;
+      _locationTurnedOff = false;
       _announcedArrival = false;
 
       // The arrival alert is not auto-dismissed, so without this it sits in
@@ -282,6 +343,8 @@ class TrackingController extends ChangeNotifier {
   /// before the first has released leaves an orphaned service behind.
   Future<void> _listen() async {
     await _subscription?.cancel();
+    await _watchArrival();
+    await _watchProviders();
     final label = _delivery?.customerName ?? 'Delivery in progress';
     _subscription = _location
         .trackPosition(
@@ -297,11 +360,55 @@ class TrackingController extends ChangeNotifier {
         );
   }
 
-  Future<void> _onPosition(Position position) async {
+  /// Notices the driver turning location off under a running trip.
+  Future<void> _watchProviders() async {
+    await _providers?.cancel();
+    _locationTurnedOff = false;
+    _providers = _location.locationEnabled.listen((enabled) {
+      if (_locationTurnedOff == !enabled) return;
+      _locationTurnedOff = !enabled;
+      notifyListeners();
+    });
+  }
+
+  /// Hands the stop's arrival radius to the OS, and listens for it.
+  ///
+  /// Belt and braces with [_maybeAnnounceArrival]: the in-app check is what
+  /// turns the live view green, and needs a fix to do it; the watched region
+  /// is what still fires when the driver is three apps away and this one is
+  /// being starved of updates. Both go through the same latch, so the driver
+  /// is told once whichever notices first.
+  Future<void> _watchArrival() async {
+    await _stopWatchingArrival();
+
+    final stop = _delivery;
+    if (stop == null || !_settings().arrivalAlerts) return;
+
+    await _location.watchArrival(
+      id: stop.id,
+      latitude: stop.latitude,
+      longitude: stop.longitude,
+      radiusMeters: _settings().arrivalRadiusMeters.toDouble(),
+    );
+
+    _arrivals = _location.arrivals.listen((id) {
+      if (id != _delivery?.id) return;
+      _announceArrival();
+    });
+  }
+
+  Future<void> _stopWatchingArrival() async {
+    await _arrivals?.cancel();
+    _arrivals = null;
+    final stop = _delivery;
+    if (stop != null) await _location.stopWatchingArrival(stop.id);
+  }
+
+  Future<void> _onPosition(Fix position) async {
     final active = _trip;
     if (active == null) return;
 
-    final point = TripPoint.fromPosition(active.id, position);
+    final point = TripPoint.fromFix(active.id, position);
     final previous = _points.isEmpty ? null : _points.last;
 
     if (previous != null &&
@@ -335,17 +442,23 @@ class TrackingController extends ChangeNotifier {
   /// configured radius. The phone is usually showing a nav app rather than
   /// this one, so a notification is the only way this lands.
   Future<void> _maybeAnnounceArrival() async {
-    if (_announcedArrival) return;
     final settings = _settings();
-    if (!settings.arrivalAlerts) return;
+    if (_announcedArrival || !settings.arrivalAlerts) return;
 
-    final stop = _delivery;
     final distance = metersToDestination;
-    if (stop == null || distance == null) return;
-    if (distance > settings.arrivalRadiusMeters) return;
+    if (distance == null || distance > settings.arrivalRadiusMeters) return;
 
-    // Set before awaiting: a burst of fixes inside the radius must not queue
-    // up several notifications.
+    await _announceArrival();
+  }
+
+  /// Says it once, whichever of the two noticed.
+  Future<void> _announceArrival() async {
+    if (_announcedArrival) return;
+    final stop = _delivery;
+    if (stop == null || !_settings().arrivalAlerts) return;
+
+    // Set before awaiting: a burst of fixes inside the radius, or a fix and a
+    // region trigger landing together, must not queue up two notifications.
     _announcedArrival = true;
     await _notifications.showArrival(
       reference: stop.reference,
@@ -376,6 +489,8 @@ class TrackingController extends ChangeNotifier {
   @override
   void dispose() {
     _subscription?.cancel();
+    _arrivals?.cancel();
+    _providers?.cancel();
     super.dispose();
   }
 }
