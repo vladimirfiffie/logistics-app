@@ -577,10 +577,37 @@ class _OutcomeCard extends StatelessWidget {
               Text(formatDateTime(at), style: TextStyle(color: foreground)),
             if (delivery.recipientName case final String name)
               Text('Received by $name', style: TextStyle(color: foreground)),
+            // Always, not only when something was scanned: how many parcels
+            // were on this stop is part of the record of what happened at the
+            // door, and "3 parcels, none scanned off" is itself an answer.
+            Text(
+              delivery.parcelsScanned == 0
+                  ? '${delivery.parcelCount} '
+                        '${delivery.parcelCount == 1 ? 'parcel' : 'parcels'}, '
+                        'none scanned off'
+                  : '${delivery.parcelsScanned} of ${delivery.parcelCount} '
+                        '${delivery.parcelCount == 1 ? 'parcel' : 'parcels'} '
+                        'scanned off',
+              style: TextStyle(color: foreground),
+            ),
             if (delivery.failureReason case final String reason)
               Text('Reason: $reason', style: TextStyle(color: foreground)),
+            // What the driver decided to do with it. Recorded at the door and
+            // worth reading back: "failed" and "failed, back tomorrow at
+            // nine" are different states of the world.
+            if (delivery.failureAction case final FailureAction action)
+              Text(action.label, style: TextStyle(color: foreground)),
             if (delivery.proofPhotoPath case final String path) ...[
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
+              Text(
+                'PROOF PHOTO',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: foreground.withValues(alpha: 0.8),
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.6,
+                ),
+              ),
+              const SizedBox(height: 6),
               ClipRRect(
                 borderRadius: BorderRadius.circular(10),
                 child: Image.file(
@@ -591,6 +618,40 @@ class _OutcomeCard extends StatelessWidget {
                   errorBuilder: (_, _, _) => Text(
                     'Proof photo is no longer on this device.',
                     style: TextStyle(color: foreground),
+                  ),
+                ),
+              ),
+            ],
+
+            // The signature was being captured, written to disk and then
+            // never shown again anywhere in the app — which makes it evidence
+            // nobody can look at. It is drawn in dark ink with a transparent
+            // background, so it goes on white rather than on the card.
+            if (delivery.signaturePath case final String path) ...[
+              const SizedBox(height: 12),
+              Text(
+                'SIGNATURE',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: foreground.withValues(alpha: 0.8),
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.6,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Image.file(
+                  File(path),
+                  height: 90,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, _, _) => Text(
+                    'The signature is no longer on this device.',
+                    style: TextStyle(color: Colors.black54),
                   ),
                 ),
               ),

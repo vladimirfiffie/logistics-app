@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
+import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../models/app_settings.dart';
@@ -114,6 +115,25 @@ class _CompleteDeliverySheetState extends State<CompleteDeliverySheet> {
       _captureError = null;
     });
     try {
+      // The proof photo goes through the system camera app, which normally
+      // needs no permission of its own. It does now: once an app *declares*
+      // android.permission.CAMERA — which this one does, for scanning parcel
+      // labels — Android throws a SecurityException on ACTION_IMAGE_CAPTURE
+      // unless that permission has actually been granted. So the scanner
+      // arriving would have quietly broken proof photos for any driver who
+      // had never scanned anything.
+      final camera = await Permission.camera.request();
+      if (!camera.isGranted) {
+        if (mounted) {
+          setState(
+            () => _captureError =
+                'The camera permission is refused, so a photo cannot be '
+                'taken. You can grant it in system settings.',
+          );
+        }
+        return;
+      }
+
       final shot = await ImagePicker().pickImage(
         source: ImageSource.camera,
         maxWidth: 1600,

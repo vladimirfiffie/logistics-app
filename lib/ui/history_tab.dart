@@ -598,6 +598,13 @@ class _HistoryCard extends StatelessWidget {
                                 unit: context.distanceUnit,
                               ),
                             ),
+                          if (delivery.parcelsScanned > 0)
+                            _Fact(
+                              icon: Icons.qr_code_scanner,
+                              text:
+                                  '${delivery.parcelsScanned}/'
+                                  '${delivery.parcelCount}',
+                            ),
                         ],
                       ),
                       if (delivery.recipientName case final String name)
@@ -616,7 +623,15 @@ class _HistoryCard extends StatelessWidget {
                         Padding(
                           padding: const EdgeInsets.only(top: 6),
                           child: Text(
-                            reason,
+                            // The reason and what was done about it read as
+                            // one sentence: "Nobody home · carded, retry
+                            // tomorrow" is the whole story of that stop.
+                            [
+                              reason,
+                              if (delivery.failureAction
+                                  case final FailureAction action)
+                                action.label.toLowerCase(),
+                            ].join(' · '),
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: scheme.error,
                               fontWeight: FontWeight.w600,

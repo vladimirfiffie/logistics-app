@@ -103,4 +103,124 @@ void main() {
 
     expect(controller.byId('nope'), isNull);
   });
+
+  group('failed stops', () {
+    test('a carded stop comes back as a second attempt', () async {
+      await repository.saveDelivery(
+        _stop('a', status: DeliveryStatus.inTransit, hour: 9, parcels: 3),
+      );
+      await controller.load();
+
+      final retry = await controller.markFailed(
+        controller.byId('a')!,
+        reason: 'Nobody home',
+        action: FailureAction.cardedRetryTomorrow,
+      );
+
+      // The attempt that failed is still the record of what happened.
+      final failed = controller.byId('a')!;
+      expect(failed.status, DeliveryStatus.failed);
+      expect(failed.failureAction, FailureAction.cardedRetryTomorrow);
+
+      // And the parcel is on the run again, carrying everything it needs.
+      expect(retry, isNotNull);
+      expect(retry!.attempt, 2);
+      expect(retry.previousAttemptId, 'a');
+      expect(retry.status, DeliveryStatus.pending);
+      expect(retry.parcelCount, 3);
+      expect(retry.failureReason, isNull);
+      expect(retry.completedAt, isNull);
+
+      expect(controller.openStops.single.id, retry.id);
+      expect(controller.closedStops.single.id, 'a');
+    });
+
+    test('returning to the depot raises nothing', () async {
+      await repository.saveDelivery(
+        _stop('a', status: DeliveryStatus.inTransit, hour: 9),
+      );
+      await controller.load();
+
+      final retry = await controller.markFailed(
+        controller.byId('a')!,
+        reason: 'Refused by customer',
+        action: FailureAction.returnToDepot,
+      );
+
+      expect(retry, isNull);
+      expect(controller.openStops, isEmpty);
+      expect(controller.byId('a')!.failureAction, FailureAction.returnToDepot);
+    });
+
+    test('a retry today is due in two hours, carding is tomorrow at nine', () {
+      final failedAt = DateTime(2026, 8, 12, 16, 30);
+
+      expect(
+        FailureAction.retryToday.nextAttemptAfter(failedAt),
+        DateTime(2026, 8, 12, 18, 30),
+      );
+      // Not "in 24 hours": a stop failed at half four should not come back at
+      // half four the next day.
+      expect(
+        FailureAction.cardedRetryTomorrow.nextAttemptAfter(failedAt),
+        DateTime(2026, 8, 13, 9),
+      );
+    });
+
+    test('the follow-up rolls over the end of a month', () {
+      expect(
+        FailureAction.cardedRetryTomorrow.nextAttemptAfter(
+          DateTime(2026, 8, 31, 17),
+        ),
+        DateTime(2026, 9, 1, 9),
+      );
+    });
+  });
+
+  group('parcels scanned', () {
+    test('records what was scanned off, capped at the parcel count', () async {
+      await repository.saveDelivery(
+        _stop('a', status: DeliveryStatus.inTransit, hour: 9, parcels: 4),
+      );
+      await controller.load();
+
+      await controller.recordParcelsScanned(controller.byId('a')!, 3);
+      expect(controller.byId('a')!.parcelsScanned, 3);
+
+      // Scanning the same label twice must not invent a fifth parcel.
+      await controller.recordParcelsScanned(controller.byId('a')!, 9);
+      expect(controller.byId('a')!.parcelsScanned, 4);
+
+      await controller.recordParcelsScanned(controller.byId('a')!, -2);
+      expect(controller.byId('a')!.parcelsScanned, 0);
+    });
+
+    test('a scanned label finds the attempt that is still open', () async {
+      const barcode = 'JD1040000123';
+      await repository.saveDelivery(
+        Delivery(
+          id: 'first',
+          reference: 'LG-1040',
+          customerName: 'Nadia Okonkwo',
+          address: 'Flat 12B',
+          latitude: 51.5,
+          longitude: -0.12,
+          status: DeliveryStatus.failed,
+          scheduledFor: DateTime(2026, 8, 11, 9),
+          barcode: barcode,
+          completedAt: DateTime(2026, 8, 11, 16),
+        ),
+      );
+      await controller.load();
+
+      final retry = await repository.raiseNextAttempt(
+        controller.byId('first')!,
+        scheduledFor: DateTime(2026, 8, 12, 9),
+      );
+      await controller.refresh();
+
+      expect((await controller.findByBarcode(barcode))!.id, retry.id);
+      expect(await controller.findByBarcode('nothing-like-it'), isNull);
+    });
+  });
 }

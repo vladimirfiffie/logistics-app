@@ -108,9 +108,16 @@ class DeliveryCard extends StatelessWidget {
                   ),
                   _Meta(
                     icon: Icons.inventory_2_outlined,
-                    text:
-                        '${delivery.parcelCount} '
-                        '${delivery.parcelCount == 1 ? 'parcel' : 'parcels'}',
+                    // Once any have been scanned off, the count that matters
+                    // is how many are accounted for.
+                    text: delivery.parcelsScanned == 0
+                        ? '${delivery.parcelCount} '
+                              '${delivery.parcelCount == 1 ? 'parcel' : 'parcels'}'
+                        : '${delivery.parcelsScanned}/'
+                              '${delivery.parcelCount} scanned',
+                    highlight:
+                        delivery.parcelsScanned > 0 &&
+                        delivery.allParcelsScanned,
                   ),
                   if (distanceMeters != null)
                     _Meta(

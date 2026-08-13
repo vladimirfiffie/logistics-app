@@ -47,9 +47,13 @@ class ExportService {
         'Completed',
         'Recipient',
         'Parcels',
+        'Parcels scanned',
+        'Barcode',
+        'Attempt',
         'Distance (m)',
         'Driving time (s)',
         'Failure reason',
+        'Outcome',
       ]),
     ];
 
@@ -69,9 +73,13 @@ class ExportService {
           stop.completedAt?.toIso8601String() ?? '',
           stop.recipientName ?? '',
           '${stop.parcelCount}',
+          '${stop.parcelsScanned}',
+          stop.barcode ?? '',
+          '${stop.attempt}',
           trip == null ? '' : trip.distanceMeters.toStringAsFixed(1),
           trip == null ? '' : '${trip.duration.inSeconds}',
           stop.failureReason ?? '',
+          stop.failureAction?.label ?? '',
         ]),
       );
     }

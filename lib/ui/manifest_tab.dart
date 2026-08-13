@@ -205,6 +205,51 @@ class _ManifestTabState extends State<ManifestTab> {
     if (startedTracking ?? false) widget.onTrackingStarted();
   }
 
+  /// Asks which of the two scanning jobs this is, then does it.
+  ///
+  /// They are genuinely different. One parcel in your hand is a lookup: scan
+  /// it, open its stop, get on. A cage full of parcels is a check: scan the
+  /// lot and find out which stops they belong to and whether anything in
+  /// there is not on today's round at all.
+  Future<void> _scan() async {
+    final many = await showAppSheet<bool>(
+      context,
+      builder: (sheetContext) => Padding(
+        padding: const EdgeInsets.fromLTRB(8, 0, 8, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: SheetHeader(
+                title: 'Scan a label',
+                icon: Icons.qr_code_scanner,
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.inventory_2_outlined),
+              title: const Text('One parcel'),
+              subtitle: const Text('Scan it and open its stop.'),
+              onTap: () => Navigator.of(sheetContext).pop(false),
+            ),
+            ListTile(
+              leading: const Icon(Icons.inventory_outlined),
+              title: const Text('Several parcels'),
+              subtitle: const Text(
+                'Scan a cage or a van load and see which stops they are for.',
+              ),
+              onTap: () => Navigator.of(sheetContext).pop(true),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (many == null || !mounted) return;
+    await (many ? _scanMany() : _scanForStop());
+  }
+
   /// Scan a parcel, land on its stop.
   ///
   /// The way a driver actually finds work: they are holding a box, not
@@ -244,6 +289,115 @@ class _ManifestTabState extends State<ManifestTab> {
       );
     }
     await _open(found);
+  }
+
+  /// Scans a load and reports back on it.
+  ///
+  /// Every label is looked up, matched labels are grouped by the stop they
+  /// belong to, and anything unrecognised is listed separately — that is the
+  /// answer worth having, because a parcel in your van that belongs to
+  /// nobody's round is a parcel that goes back tonight.
+  Future<void> _scanMany() async {
+    final codes = await BarcodeScanSheet.scanMany(context);
+    if (codes == null || codes.isEmpty || !mounted) return;
+
+    final deliveries = context.read<DeliveryController>();
+    final matched = <String, ({Delivery stop, int labels})>{};
+    final unknown = <String>[];
+
+    for (final code in codes) {
+      final found = await deliveries.findByBarcode(code);
+      if (found == null) {
+        unknown.add(code);
+        continue;
+      }
+      final seen = matched[found.id];
+      matched[found.id] = (stop: found, labels: (seen?.labels ?? 0) + 1);
+    }
+
+    // Counting a load and then throwing the count away would be daft: what
+    // was scanned onto the van is the same fact as what gets scanned off at
+    // the door, so it is recorded against the stop and the manifest card says
+    // "4/6 scanned" from here on.
+    for (final entry in matched.values) {
+      if (!entry.stop.status.isOpen) continue;
+      await deliveries.recordParcelsScanned(entry.stop, entry.labels);
+    }
+
+    if (!mounted) return;
+    await AppHaptics.delivered();
+    if (!mounted) return;
+
+    await showAppSheet<void>(
+      context,
+      maxHeightFactor: 0.85,
+      builder: (sheetContext) => Padding(
+        padding: const EdgeInsets.fromLTRB(8, 0, 8, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: SheetHeader(
+                title:
+                    '${codes.length} '
+                    '${codes.length == 1 ? 'label' : 'labels'} scanned',
+                subtitle: unknown.isEmpty
+                    ? 'Every one of them is on your run.'
+                    : '${unknown.length} of them '
+                          '${unknown.length == 1 ? 'is' : 'are'} not on your '
+                          'run at all.',
+                icon: Icons.inventory_outlined,
+              ),
+            ),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final entry in matched.values)
+                    ListTile(
+                      leading: Icon(
+                        entry.stop.status.isOpen
+                            ? Icons.local_shipping_outlined
+                            : Icons.check_circle_outline,
+                      ),
+                      title: Text(
+                        '${entry.stop.reference} · '
+                        '${entry.stop.customerName}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        [
+                          '${entry.labels} of ${entry.stop.parcelCount} '
+                              'scanned',
+                          if (!entry.stop.status.isOpen)
+                            entry.stop.status.label.toLowerCase(),
+                        ].join(' · '),
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () {
+                        Navigator.of(sheetContext).pop();
+                        _open(entry.stop);
+                      },
+                    ),
+                  for (final code in unknown)
+                    ListTile(
+                      leading: Icon(
+                        Icons.help_outline,
+                        color: Theme.of(sheetContext).colorScheme.error,
+                      ),
+                      title: Text(code),
+                      subtitle: const Text('Not on this manifest'),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -292,7 +446,7 @@ class _ManifestTabState extends State<ManifestTab> {
                     // and typing a reference are the same job done two ways,
                     // and one hand is usually holding a parcel.
                     IconButton(
-                      onPressed: _scanForStop,
+                      onPressed: _scan,
                       icon: const Icon(Icons.qr_code_scanner),
                       tooltip: 'Scan a parcel label',
                     ),

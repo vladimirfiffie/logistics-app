@@ -68,6 +68,58 @@ class ReleaseNote {
 /// back into the last one.
 final releaseNotes = <ReleaseNote>[
   ReleaseNote(
+    version: '1.0.0-beta.9',
+    date: DateTime.utc(2026, 8, 12),
+    headline: 'Scan a whole load, and see what actually happened at the door.',
+    highlights: [
+      ReleaseChange(
+        'Scan one parcel or a whole load',
+        'The scan button now asks which job it is. One parcel opens its stop. '
+            'Several lets you work through a cage and then tells you which '
+            'stops they are for — and flags anything in your van that is not '
+            'on the round at all.',
+      ),
+      ReleaseChange(
+        'A scanned load is remembered',
+        'What you scanned onto the van counts towards what gets scanned off '
+            'at the door, so the manifest reads "4/6 scanned" and the door '
+            'sheet carries on from there.',
+      ),
+      ReleaseChange(
+        'The signature is finally visible',
+        'It was being captured and saved and then shown nowhere. Open a '
+            'finished stop and the signature and the proof photo are both '
+            'there, alongside how many parcels were scanned off.',
+      ),
+      ReleaseChange(
+        'What happened to a stop, everywhere',
+        'The parcel count and what you decided about a failed stop now read '
+            'on the manifest, in history and in the CSV export, instead of '
+            'only on the sheet that recorded them.',
+      ),
+    ],
+    fixes: [
+      ReleaseChange(
+        'Proof photos still work',
+        'Adding the parcel scanner meant the app declares the camera '
+            'permission, and Android then refuses the ordinary camera to any '
+            'app that has not been granted it. A driver who had never scanned '
+            'a label would have found the proof photo failing at the door.',
+      ),
+      ReleaseChange(
+        'The scanner closes cleanly',
+        'A label read in the same instant you tapped Cancel could crash the '
+            'sheet.',
+      ),
+    ],
+    minor: [
+      'The CSV export carries the barcode, the parcels scanned, the attempt '
+          'number and the outcome of a failed stop.',
+      'History searches barcodes as well as references, customers, streets '
+          'and signers.',
+    ],
+  ),
+  ReleaseNote(
     version: '1.0.0-beta.8',
     date: DateTime.utc(2026, 8, 12),
     headline: 'The end of the day, and a live view that gets out of the way.',

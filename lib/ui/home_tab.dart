@@ -152,7 +152,7 @@ class _HomeTabState extends State<HomeTab> with WidgetsBindingObserver {
 
     await AppHaptics.trackingStopped();
     if (!mounted) return;
-    await _showShiftSummary(finished, shifts);
+    await _showShiftSummary(finished);
   }
 
   /// The day, added up, at the one moment it is worth reading.
@@ -161,7 +161,7 @@ class _HomeTabState extends State<HomeTab> with WidgetsBindingObserver {
   /// closed and the trips driven — so this is a read and a sum, not new
   /// bookkeeping. A summary that cannot be assembled must not swallow the
   /// clock-off, so it falls back to the line it used to print.
-  Future<void> _showShiftSummary(Shift finished, ShiftController shifts) async {
+  Future<void> _showShiftSummary(Shift finished) async {
     final settings = context.read<SettingsController>().settings;
     final deliveries = context.read<DeliveryController>();
 
