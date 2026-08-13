@@ -68,6 +68,47 @@ class ReleaseNote {
 /// back into the last one.
 final releaseNotes = <ReleaseNote>[
   ReleaseNote(
+    version: '1.0.0-beta.8',
+    date: DateTime.utc(2026, 8, 12),
+    headline: 'The end of the day, and a live view that gets out of the way.',
+    highlights: [
+      ReleaseChange(
+        'The day, added up',
+        'Clocking off no longer flashes a line of grey text at you. It shows '
+            'the hours you worked with the breaks taken out, what you '
+            'delivered, how far it took and what it came to.',
+      ),
+      ReleaseChange(
+        'How far, and how long',
+        'The live view says how much is left to the stop and roughly how long '
+            'it will take, worked out from the pace you are actually driving '
+            'rather than the speed at the moment you look.',
+      ),
+      ReleaseChange(
+        'Fold the panel away',
+        'Pull the trip panel down to a single line — the stop and the '
+            'distance left — and the map gets the rest of the screen. A tap '
+            'brings it back.',
+      ),
+      ReleaseChange(
+        "Arriving looks like arriving",
+        'Pull up at the stop and the panel turns green, leads with the '
+            'customer, and puts the two buttons you actually need at the top '
+            'of it. If you had folded it away, it opens itself.',
+      ),
+      ReleaseChange(
+        'Single or multiple parcels',
+        'Adding stops asks whether you want one box per drop, three to nine, '
+            'or a mix — the two cases are different jobs at the door.',
+      ),
+    ],
+    minor: [
+      'Parcels on board are not shown while you are clocked off.',
+      'The accuracy and fix count stand down from the live panel once you '
+          'are at the door, where they have nothing to say.',
+    ],
+  ),
+  ReleaseNote(
     version: '1.0.0-beta.7',
     date: DateTime.utc(2026, 8, 12),
     headline: 'Scan the parcel, chase the failed drop, count the money.',
@@ -98,10 +139,9 @@ final releaseNotes = <ReleaseNote>[
             'app never messages anyone on its own.',
       ),
       ReleaseChange(
-        'The day, added up',
-        'Clocking off no longer flashes a line of grey text at you. It shows '
-            'the hours you worked with the breaks taken out, what you '
-            'delivered, how far it took and what it came to.',
+        'Search your history',
+        'Find a stop by reference, customer, street, label or who signed for '
+            'it, and narrow it to today, this week or this month.',
       ),
       ReleaseChange(
         'A route that keeps your slots',
@@ -119,17 +159,6 @@ final releaseNotes = <ReleaseNote>[
       ),
     ],
     minor: [
-      'The live view says how far is left and roughly how long it will take, '
-          'from the pace you are actually driving.',
-      'Fold the trip panel down to one line to give the map the screen, and '
-          'pull it back up with a tap.',
-      'Pulling up at the stop turns the panel green and puts the two buttons '
-          'you need at the top of it.',
-      'Search your history by reference, customer, street, label or who '
-          'signed for it, and narrow it to today, this week or this month.',
-      'Adding stops asks whether you want single-parcel drops, multi-parcel '
-          'drops, or a mix.',
-      'Parcels on board are not shown when you are clocked off.',
       'The home screen holds back the progress ring and the day\'s figures '
           'until there is a day to report, so first thing in the morning it '
           'shows your shift and your next stop.',
