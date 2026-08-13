@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import 'package:haptic_kit/haptic_kit.dart';
@@ -15,6 +16,7 @@ import '../state/settings_controller.dart';
 import 'delivery_actions.dart';
 import 'formatters.dart';
 import 'widgets/app_sheet.dart';
+import 'widgets/outcome_colors.dart';
 import 'widgets/stat_tile.dart';
 import 'widgets/trip_map.dart';
 
@@ -42,6 +44,19 @@ class _LiveTabState extends State<LiveTab> {
   /// the map, and a driver checking which way the road bends does not need
   /// either of them.
   bool _chromeHidden = false;
+
+  /// The trip panel dragged down to its peek bar. Between "everything" and
+  /// the long-press "nothing": the driver still sees which stop they are on
+  /// and how far is left, and gets two thirds of the screen back for the map.
+  bool _panelCollapsed = false;
+
+  /// Set once the arrival state has been shown for this trip, so collapsing
+  /// the panel and arriving cannot fight each other — arriving opens the
+  /// panel once, and after that the driver's choice stands.
+  bool _openedOnArrival = false;
+
+  /// Which trip [_openedOnArrival] belongs to.
+  String? _armedTripId;
   bool _backgroundPermissionGranted = true;
   int _seenFixes = 0;
   int _recentreRequests = 0;
@@ -79,7 +94,32 @@ class _LiveTabState extends State<LiveTab> {
     if (_seenFixes == 0 && fixes > 0) AppHaptics.firstFix();
     _seenFixes = fixes;
 
+    // A new trip starts with a fresh panel: the arrival state belongs to the
+    // stop it fired for.
+    if (tracking.trip?.id != _armedTripId) {
+      _armedTripId = tracking.trip?.id;
+      _openedOnArrival = false;
+    }
+
+    // Arriving opens the panel, once. The driver is about to need the
+    // complete and failed buttons, and hunting for a collapsed panel with a
+    // parcel under one arm is exactly the moment not to make them.
+    if (tracking.hasArrived && !_openedOnArrival && mounted) {
+      _openedOnArrival = true;
+      if (_panelCollapsed || _chromeHidden) {
+        setState(() {
+          _panelCollapsed = false;
+          _chromeHidden = false;
+        });
+      }
+    }
+
     _syncWakelock(tracking.isTracking);
+  }
+
+  void _togglePanel() {
+    AppHaptics.select();
+    setState(() => _panelCollapsed = !_panelCollapsed);
   }
 
   /// Long press hides the chrome; long press again brings it back. Announced
@@ -296,6 +336,8 @@ class _LiveTabState extends State<LiveTab> {
                       tracking: tracking,
                       delivery: delivery,
                       slideKey: _slideKey,
+                      collapsed: _panelCollapsed,
+                      onToggleCollapsed: _togglePanel,
                       onArrived: () => _arrived(delivery),
                       onFailed: () => failDelivery(context, delivery),
                       onEndTrip: _stopRecording,
@@ -401,6 +443,108 @@ class _DestinationBanner extends StatelessWidget {
   }
 }
 
+/// The trip panel folded down to one line.
+///
+/// Keeps the two things a driver needs while actually driving — which stop
+/// they are on and how far is left — and gives the rest of the screen back to
+/// the map. Everything else is one tap away.
+class _PeekBar extends StatelessWidget {
+  const _PeekBar({
+    required this.delivery,
+    required this.remaining,
+    required this.eta,
+    required this.arrived,
+    required this.onExpand,
+  });
+
+  final Delivery delivery;
+  final double? remaining;
+  final Duration? eta;
+  final bool arrived;
+  final VoidCallback onExpand;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final unit = context.distanceUnit;
+    final foreground = arrived ? context.onDeliveredContainer : null;
+
+    return InkWell(
+      onTap: onExpand,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 10, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            GestureDetector(
+              onVerticalDragEnd: (details) {
+                if ((details.primaryVelocity ?? 0) < 0) onExpand();
+              },
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Center(
+                  child: Container(
+                    width: 38,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: (foreground ?? theme.colorScheme.onSurfaceVariant)
+                          .withValues(alpha: 0.4),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Row(
+              children: [
+                Icon(
+                  arrived ? Icons.where_to_vote : Icons.flag_outlined,
+                  size: 20,
+                  color: foreground ?? theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        arrived
+                            ? "You're here"
+                            : remaining == null
+                            ? 'Waiting for a fix'
+                            : '${formatDistance(remaining!, unit: unit)} to go'
+                                  '${eta == null ? '' : ' · ${formatDuration(eta!)}'}',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: foreground,
+                        ),
+                      ),
+                      Text(
+                        delivery.customerName,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color:
+                              foreground ?? theme.colorScheme.onSurfaceVariant,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.keyboard_arrow_up,
+                  color: foreground ?? theme.colorScheme.onSurfaceVariant,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _RecordingDot extends StatelessWidget {
   const _RecordingDot({required this.active});
 
@@ -467,6 +611,8 @@ class _TripPanel extends StatelessWidget {
     required this.tracking,
     required this.delivery,
     required this.slideKey,
+    required this.collapsed,
+    required this.onToggleCollapsed,
     required this.onArrived,
     required this.onFailed,
     required this.onEndTrip,
@@ -474,6 +620,11 @@ class _TripPanel extends StatelessWidget {
 
   final TrackingController tracking;
   final Delivery delivery;
+
+  /// Dragged down to the peek bar.
+  final bool collapsed;
+
+  final VoidCallback onToggleCollapsed;
   final GlobalKey<SlideToConfirmState> slideKey;
   final VoidCallback onArrived;
   final VoidCallback onFailed;
@@ -485,46 +636,137 @@ class _TripPanel extends StatelessWidget {
     final unit = context.distanceUnit;
     final fix = tracking.lastPosition;
     final remaining = tracking.metersToDestination;
+    final eta = tracking.etaToDestination;
+    final arrived = tracking.hasArrived && tracking.isTracking;
 
     return Card(
       margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
       elevation: 4,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
+      // Green at the door: the panel changing colour is the fastest way to
+      // say "you are here" to someone glancing at a phone on a mount.
+      color: arrived ? context.deliveredContainer : null,
+      child: AnimatedSize(
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOutCubic,
+        alignment: Alignment.bottomCenter,
+        child: collapsed
+            ? _PeekBar(
+                delivery: delivery,
+                remaining: remaining,
+                eta: eta,
+                arrived: arrived,
+                onExpand: onToggleCollapsed,
+              )
+            : _full(context, theme, unit, fix, remaining, eta, arrived),
+      ),
+    );
+  }
+
+  Widget _full(
+    BuildContext context,
+    ThemeData theme,
+    DistanceUnit unit,
+    Position? fix,
+    double? remaining,
+    Duration? eta,
+    bool arrived,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 14),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // The grab handle. Tappable as well as draggable, because a tap is
+          // what everyone tries first.
+          GestureDetector(
+            onTap: onToggleCollapsed,
+            onVerticalDragEnd: (details) {
+              if ((details.primaryVelocity ?? 0) > 0) onToggleCollapsed();
+            },
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Center(
+                child: Container(
+                  width: 38,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.onSurfaceVariant.withValues(
+                      alpha: 0.4,
+                    ),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          if (arrived) ...[
             Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Icon(Icons.where_to_vote, color: context.onDeliveredContainer),
+                const SizedBox(width: 10),
                 Expanded(
-                  child: StatTile(
-                    label: 'TO GO',
-                    value: remaining == null
-                        ? '—'
-                        : formatDistance(remaining, unit: unit),
-                    icon: Icons.flag_outlined,
-                    emphasis: true,
-                  ),
-                ),
-                Expanded(
-                  child: StatTile(
-                    label: 'DRIVEN',
-                    value: formatDistance(tracking.distanceMeters, unit: unit),
-                    icon: Icons.route_outlined,
-                  ),
-                ),
-                Expanded(
-                  child: StatTile(
-                    label: 'ELAPSED',
-                    value: formatDuration(tracking.elapsed),
-                    icon: Icons.timer_outlined,
+                  child: Text(
+                    "You're here — ${delivery.customerName}",
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: context.onDeliveredContainer,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
+          ],
+
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: StatTile(
+                  label: 'TO GO',
+                  value: remaining == null
+                      ? '—'
+                      : formatDistance(remaining, unit: unit),
+                  icon: Icons.flag_outlined,
+                  emphasis: true,
+                ),
+              ),
+              Expanded(
+                child: StatTile(
+                  // Straight-line, from the pace actually being driven.
+                  // "—" until there is enough trip to average, which is
+                  // better than a confident number pulled out of nothing.
+                  label: 'ETA',
+                  value: eta == null ? '—' : formatDuration(eta),
+                  icon: Icons.schedule,
+                ),
+              ),
+              Expanded(
+                child: StatTile(
+                  label: 'DRIVEN',
+                  value: formatDistance(tracking.distanceMeters, unit: unit),
+                  icon: Icons.route_outlined,
+                ),
+              ),
+              Expanded(
+                child: StatTile(
+                  label: 'ELAPSED',
+                  value: formatDuration(tracking.elapsed),
+                  icon: Icons.timer_outlined,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // The second row is instrumentation rather than driving
+          // information, so it stands down once the driver is at the door
+          // and the panel has a job to do.
+          if (!arrived)
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -554,113 +796,112 @@ class _TripPanel extends StatelessWidget {
               ],
             ),
 
-            if (fix == null && tracking.isTracking) ...[
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  const SizedBox(
-                    width: 13,
-                    height: 13,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  const SizedBox(width: 10),
-                  Text(
-                    'Waiting for the first GPS fix…',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ],
-              ),
-            ],
-
-            // A finished trip still on screen looks exactly like a running
-            // one otherwise, which is half of why "stop" felt like it had not
-            // worked.
-            if (!tracking.isTracking) ...[
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Icon(
-                    Icons.location_off_outlined,
-                    size: 15,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Recording stopped. Your location is no longer being '
-                      'shared.',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-
-            if (tracking.error case final Object error) ...[
-              const SizedBox(height: 10),
-              Text(
-                '$error',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.error,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-
-            const SizedBox(height: 14),
-            // A tap is easy to hit by accident on a phone bouncing in a van,
-            // and closing out the wrong stop is a nuisance to undo — so the
-            // default is a deliberate slide.
-            if (context.appSettings.confirmWithSlide)
-              SlideToConfirm(
-                key: slideKey,
-                label: 'Slide when you have arrived',
-                onConfirmed: tracking.isBusy ? () {} : onArrived,
-                trackColor: theme.colorScheme.surfaceContainerHighest,
-                handleColor: theme.colorScheme.primary,
-                textColor: theme.colorScheme.onSurfaceVariant,
-              )
-            else
-              FilledButton.icon(
-                onPressed: tracking.isBusy ? null : onArrived,
-                icon: const Icon(Icons.check_circle_outline),
-                label: const Text('Arrived — complete delivery'),
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(50),
-                ),
-              ),
-            const SizedBox(height: 6),
+          if (fix == null && tracking.isTracking) ...[
+            const SizedBox(height: 10),
             Row(
               children: [
-                Expanded(
-                  child: TextButton.icon(
-                    onPressed: tracking.isBusy ? null : onFailed,
-                    icon: const Icon(
-                      Icons.report_gmailerrorred_outlined,
-                      size: 18,
-                    ),
-                    label: const Text("Couldn't deliver"),
-                    style: TextButton.styleFrom(
-                      foregroundColor: theme.colorScheme.error,
-                    ),
-                  ),
+                const SizedBox(
+                  width: 13,
+                  height: 13,
+                  child: CircularProgressIndicator(strokeWidth: 2),
                 ),
+                const SizedBox(width: 10),
+                Text(
+                  'Waiting for the first GPS fix…',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ],
+
+          // A finished trip still on screen looks exactly like a running
+          // one otherwise, which is half of why "stop" felt like it had not
+          // worked.
+          if (!tracking.isTracking) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Icon(
+                  Icons.location_off_outlined,
+                  size: 15,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 8),
                 Expanded(
-                  child: TextButton.icon(
-                    onPressed: tracking.isBusy || !tracking.isTracking
-                        ? null
-                        : () => onEndTrip(),
-                    icon: const Icon(Icons.stop_circle_outlined, size: 18),
-                    label: const Text('Stop recording'),
+                  child: Text(
+                    'Recording stopped. Your location is no longer being '
+                    'shared.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ),
               ],
             ),
           ],
-        ),
+
+          if (tracking.error case final Object error) ...[
+            const SizedBox(height: 10),
+            Text(
+              '$error',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.error,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+
+          const SizedBox(height: 14),
+          // A tap is easy to hit by accident on a phone bouncing in a van,
+          // and closing out the wrong stop is a nuisance to undo — so the
+          // default is a deliberate slide.
+          if (context.appSettings.confirmWithSlide)
+            SlideToConfirm(
+              key: slideKey,
+              label: 'Slide when you have arrived',
+              onConfirmed: tracking.isBusy ? () {} : onArrived,
+              trackColor: theme.colorScheme.surfaceContainerHighest,
+              handleColor: theme.colorScheme.primary,
+              textColor: theme.colorScheme.onSurfaceVariant,
+            )
+          else
+            FilledButton.icon(
+              onPressed: tracking.isBusy ? null : onArrived,
+              icon: const Icon(Icons.check_circle_outline),
+              label: const Text('Arrived — complete delivery'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+              ),
+            ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: TextButton.icon(
+                  onPressed: tracking.isBusy ? null : onFailed,
+                  icon: const Icon(
+                    Icons.report_gmailerrorred_outlined,
+                    size: 18,
+                  ),
+                  label: const Text("Couldn't deliver"),
+                  style: TextButton.styleFrom(
+                    foregroundColor: theme.colorScheme.error,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: TextButton.icon(
+                  onPressed: tracking.isBusy || !tracking.isTracking
+                      ? null
+                      : () => onEndTrip(),
+                  icon: const Icon(Icons.stop_circle_outlined, size: 18),
+                  label: const Text('Stop recording'),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

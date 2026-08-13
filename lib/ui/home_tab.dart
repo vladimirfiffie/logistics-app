@@ -19,6 +19,7 @@ import 'delivery_detail_sheet.dart';
 import 'formatters.dart';
 import 'settings_screen.dart';
 import 'shift_actions.dart';
+import 'shift_summary_sheet.dart';
 import 'widgets/app_sheet.dart';
 import 'widgets/outcome_colors.dart';
 import 'widgets/page_top_inset.dart';
@@ -151,7 +152,63 @@ class _HomeTabState extends State<HomeTab> with WidgetsBindingObserver {
 
     await AppHaptics.trackingStopped();
     if (!mounted) return;
-    _say('Clocked off · ${formatDuration(finished.duration)} on shift.');
+    await _showShiftSummary(finished, shifts);
+  }
+
+  /// The day, added up, at the one moment it is worth reading.
+  ///
+  /// Everything here is already recorded — the shift, its breaks, the stops
+  /// closed and the trips driven — so this is a read and a sum, not new
+  /// bookkeeping. A summary that cannot be assembled must not swallow the
+  /// clock-off, so it falls back to the line it used to print.
+  Future<void> _showShiftSummary(Shift finished, ShiftController shifts) async {
+    final settings = context.read<SettingsController>().settings;
+    final deliveries = context.read<DeliveryController>();
+
+    try {
+      final repository = context.read<DeliveryRepository>();
+      final breaks = await repository.breaksForShift(finished.id);
+      final trips = await repository.fetchTrips();
+
+      final from = finished.startedAt;
+      final to = finished.endedAt ?? DateTime.now();
+      bool duringShift(DateTime at) => !at.isBefore(from) && !at.isAfter(to);
+
+      final closed = [
+        for (final stop in deliveries.closedStops)
+          if (stop.completedAt case final DateTime at when duringShift(at))
+            stop,
+      ];
+
+      final taken = breaks.fold(
+        Duration.zero,
+        (sum, item) => sum + item.duration,
+      );
+      final net = finished.duration - taken;
+
+      if (!mounted) return;
+      await ShiftSummarySheet.show(
+        context,
+        settings: settings,
+        summary: (
+          shift: finished,
+          worked: net.isNegative ? Duration.zero : net,
+          breaks: taken,
+          stopsClosed: closed.length,
+          delivered: closed
+              .where((stop) => stop.status == DeliveryStatus.delivered)
+              .length,
+          distanceMeters: trips
+              .where((trip) => duringShift(trip.startedAt))
+              .fold(0.0, (sum, trip) => sum + trip.distanceMeters),
+        ),
+      );
+    } catch (error) {
+      debugPrint('could not build the shift summary: $error');
+      if (mounted) {
+        _say('Clocked off · ${formatDuration(finished.duration)} on shift.');
+      }
+    }
   }
 
   /// Breaks are one tap each way. The kind is only asked for when starting
@@ -359,6 +416,13 @@ class _HomeTabState extends State<HomeTab> with WidgetsBindingObserver {
     final done = closed.length;
     final next = _nextStop(controller);
 
+    // Parcels on board is a fact about a van being driven. Clocked off, the
+    // van is not the driver's problem and the figure is noise on a screen
+    // they are only looking at to clock on.
+    final onShift = context.select<ShiftController, bool>(
+      (shifts) => shifts.isOnShift,
+    );
+
     // Built once here rather than inside itemBuilder, which rebuilt the whole
     // filtered list for every row it drew.
     final upcoming = [
@@ -450,7 +514,7 @@ class _HomeTabState extends State<HomeTab> with WidgetsBindingObserver {
                   _ProgressCard(
                         done: done,
                         total: total,
-                        parcels: controller.remainingParcels,
+                        parcels: onShift ? controller.remainingParcels : null,
                       )
                       .animate()
                       .fadeIn(delay: 80.ms, duration: 320.ms)
@@ -474,11 +538,12 @@ class _HomeTabState extends State<HomeTab> with WidgetsBindingObserver {
                               label: 'Driving',
                               value: formatDuration(_drivingToday),
                             ),
-                            _MiniStat(
-                              icon: Icons.inventory_2_outlined,
-                              label: 'Parcels',
-                              value: '${controller.remainingParcels}',
-                            ),
+                            if (onShift)
+                              _MiniStat(
+                                icon: Icons.inventory_2_outlined,
+                                label: 'Parcels',
+                                value: '${controller.remainingParcels}',
+                              ),
                           ],
                         ),
                       )
@@ -581,7 +646,10 @@ class _ProgressCard extends StatelessWidget {
 
   final int done;
   final int total;
-  final int parcels;
+
+  /// Null when the driver is clocked off, which drops the line about what is
+  /// still on the van.
+  final int? parcels;
 
   @override
   Widget build(BuildContext context) {
@@ -649,17 +717,19 @@ class _ProgressCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      parcels == 0
-                          ? 'Van empty.'
-                          : '$parcels ${parcels == 1 ? 'parcel' : 'parcels'} '
-                                'still on board',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onPrimaryContainer.withValues(
-                          alpha: 0.85,
+                    if (parcels case final int onBoard)
+                      Text(
+                        onBoard == 0
+                            ? 'Van empty.'
+                            : '$onBoard '
+                                  '${onBoard == 1 ? 'parcel' : 'parcels'} '
+                                  'still on board',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onPrimaryContainer.withValues(
+                            alpha: 0.85,
+                          ),
                         ),
                       ),
-                    ),
                   ],
                 ),
               ),

@@ -98,9 +98,10 @@ final releaseNotes = <ReleaseNote>[
             'app never messages anyone on its own.',
       ),
       ReleaseChange(
-        'Search your history',
-        'Find a stop by reference, customer, street, label or who signed for '
-            'it, and narrow it to today, this week or this month.',
+        'The day, added up',
+        'Clocking off no longer flashes a line of grey text at you. It shows '
+            'the hours you worked with the breaks taken out, what you '
+            'delivered, how far it took and what it came to.',
       ),
       ReleaseChange(
         'A route that keeps your slots',
@@ -118,6 +119,17 @@ final releaseNotes = <ReleaseNote>[
       ),
     ],
     minor: [
+      'The live view says how far is left and roughly how long it will take, '
+          'from the pace you are actually driving.',
+      'Fold the trip panel down to one line to give the map the screen, and '
+          'pull it back up with a tap.',
+      'Pulling up at the stop turns the panel green and puts the two buttons '
+          'you need at the top of it.',
+      'Search your history by reference, customer, street, label or who '
+          'signed for it, and narrow it to today, this week or this month.',
+      'Adding stops asks whether you want single-parcel drops, multi-parcel '
+          'drops, or a mix.',
+      'Parcels on board are not shown when you are clocked off.',
       'The home screen holds back the progress ring and the day\'s figures '
           'until there is a day to report, so first thing in the morning it '
           'shows your shift and your next stop.',

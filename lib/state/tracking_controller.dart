@@ -99,6 +99,45 @@ class TrackingController extends ChangeNotifier {
     );
   }
 
+  /// Roughly how long the rest of the way will take.
+  ///
+  /// Straight-line distance over the pace actually being driven, which is a
+  /// blunt instrument — it knows nothing about the roads, and the last stop of
+  /// a round through a housing estate will beat it badly. It is honest about
+  /// the order of magnitude, which is what "do I stop for a coffee first?"
+  /// actually needs.
+  ///
+  /// The trip average is used rather than the instantaneous speed: a driver
+  /// sitting at a red light is not stationary for the rest of the day, and an
+  /// ETA that jumps to infinity every junction is worse than none. Null until
+  /// there is enough of a trip to average, or when the pace is implausible.
+  Duration? get etaToDestination {
+    final remaining = metersToDestination;
+    if (remaining == null) return null;
+
+    final live = _lastPosition?.speed ?? 0;
+    // Weighted towards the average, nudged by current speed so pulling onto a
+    // fast road shortens it a little rather than not at all.
+    final pace = averageSpeed <= 0
+        ? live
+        : (averageSpeed * 0.7) + (live.clamp(0, 40) * 0.3);
+    if (pace < 0.5) return null;
+
+    final seconds = remaining / pace;
+    if (!seconds.isFinite || seconds > 6 * 60 * 60) return null;
+    return Duration(seconds: seconds.round());
+  }
+
+  /// Whether the driver is inside the arrival radius of the stop. Drives the
+  /// live view's arrival state, and is deliberately the same threshold the
+  /// arrival notification uses — two different definitions of "here" on one
+  /// screen would be indefensible.
+  bool get hasArrived {
+    final remaining = metersToDestination;
+    if (remaining == null) return false;
+    return remaining <= _settings().arrivalRadiusMeters;
+  }
+
   /// Picks up a session that survived an app restart. Android can kill the UI
   /// while the foreground service keeps running, so on launch we check whether
   /// a trip was left open and resume streaming into it.

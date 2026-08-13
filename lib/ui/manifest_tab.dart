@@ -168,37 +168,13 @@ class _ManifestTabState extends State<ManifestTab> {
   /// Stands in for a dispatch backend: without one there is no way to get a
   /// bigger round than the six stops the first run seeds.
   Future<void> _addStops() async {
-    final count = await showAppSheet<int>(
+    final request = await showAppSheet<({int count, ParcelLoad parcels})>(
       context,
-      builder: (sheetContext) => Padding(
-        padding: const EdgeInsets.fromLTRB(8, 0, 8, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: SheetHeader(
-                title: 'Add stops',
-                subtitle:
-                    'Generates extra deliveries around you. There is no '
-                    'dispatch backend yet, so this is how you get a bigger '
-                    'round to work with.',
-                icon: Icons.add_road,
-              ),
-            ),
-            for (final option in const [5, 10, 25])
-              ListTile(
-                leading: const Icon(Icons.local_shipping_outlined),
-                title: Text('Add $option stops'),
-                onTap: () => Navigator.of(sheetContext).pop(option),
-              ),
-          ],
-        ),
-      ),
+      maxHeightFactor: 0.85,
+      builder: (sheetContext) => _AddStopsSheet(),
     );
 
-    if (count == null || !mounted) return;
+    if (request == null || !mounted) return;
 
     final repository = context.read<DeliveryRepository>();
     final deliveries = context.read<DeliveryController>();
@@ -206,7 +182,8 @@ class _ManifestTabState extends State<ManifestTab> {
 
     final created = await SeedData.addStops(
       repository,
-      count: count,
+      count: request.count,
+      parcels: request.parcels,
       origin: fix == null ? null : LatLng(fix.latitude, fix.longitude),
     );
     await deliveries.refresh();
@@ -419,6 +396,116 @@ class _ManifestTabState extends State<ManifestTab> {
 
             // Clears the extended FAB at the end of the list.
             const SliverToBoxAdapter(child: SizedBox(height: 88)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// How many stops to generate, and how many parcels they carry.
+///
+/// The parcel choice is the point of the sheet as much as the count is: a
+/// round of single-parcel drops and a round of six-box drops are different
+/// jobs, and the app behaves differently at the door for each.
+class _AddStopsSheet extends StatefulWidget {
+  @override
+  State<_AddStopsSheet> createState() => _AddStopsSheetState();
+}
+
+class _AddStopsSheetState extends State<_AddStopsSheet> {
+  int _count = 5;
+  ParcelLoad _parcels = ParcelLoad.mixed;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SheetHeader(
+              title: 'Add stops',
+              subtitle:
+                  'Generates extra deliveries around you. There is no dispatch '
+                  'backend yet, so this is how you get a bigger round to work '
+                  'with.',
+              icon: Icons.add_road,
+            ),
+            const SizedBox(height: 20),
+
+            Text(
+              'HOW MANY',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.8,
+              ),
+            ),
+            const SizedBox(height: 8),
+            SegmentedButton<int>(
+              segments: const [
+                ButtonSegment(value: 5, label: Text('5')),
+                ButtonSegment(value: 10, label: Text('10')),
+                ButtonSegment(value: 25, label: Text('25')),
+                ButtonSegment(value: 50, label: Text('50')),
+              ],
+              selected: {_count},
+              onSelectionChanged: (selection) {
+                AppHaptics.select();
+                setState(() => _count = selection.first);
+              },
+            ),
+
+            const SizedBox(height: 20),
+            Text(
+              'PARCELS PER STOP',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.8,
+              ),
+            ),
+            const SizedBox(height: 4),
+            RadioGroup<ParcelLoad>(
+              groupValue: _parcels,
+              onChanged: (load) {
+                if (load == null) return;
+                AppHaptics.select();
+                setState(() => _parcels = load);
+              },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final load in ParcelLoad.values)
+                    RadioListTile<ParcelLoad>(
+                      value: load,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(load.label),
+                      subtitle: Text(load.detail),
+                    ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 14),
+            FilledButton.icon(
+              onPressed: () =>
+                  Navigator.of(context).pop((count: _count, parcels: _parcels)),
+              icon: const Icon(Icons.add),
+              label: Text('Add $_count ${_count == 1 ? 'stop' : 'stops'}'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
           ],
         ),
       ),

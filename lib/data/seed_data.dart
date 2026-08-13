@@ -7,6 +7,35 @@ import 'package:uuid/uuid.dart';
 import '../models/delivery.dart';
 import 'delivery_repository.dart';
 
+/// How many parcels the stops being added should carry.
+enum ParcelLoad {
+  single(
+    'Single parcel',
+    'One box per stop. A tick at the door, nothing to scan off.',
+  ),
+  multiple(
+    'Multiple parcels',
+    'Three to nine per stop, so the parcel scanner has something to count.',
+  ),
+  mixed(
+    'A mix',
+    'Mostly one or two, the odd big drop. Closest to a real round.',
+  );
+
+  const ParcelLoad(this.label, this.detail);
+
+  final String label;
+  final String detail;
+
+  /// [residential] stops lean towards a single parcel in the mixed case,
+  /// which is what a real round looks like.
+  int countFor(Random random, {required bool residential}) => switch (this) {
+    ParcelLoad.single => 1,
+    ParcelLoad.multiple => 3 + random.nextInt(7),
+    ParcelLoad.mixed => residential ? 1 : random.nextInt(8) + 1,
+  };
+}
+
 /// Seeds a starter manifest the first time the app runs.
 ///
 /// With no dispatch backend there is nothing to pull a day's work from, so we
@@ -193,9 +222,14 @@ class SeedData {
   /// from — this is how you get more to test against. References continue
   /// from the highest existing one so they never collide, and the stops are
   /// scattered around [origin] like the initial seed.
+  ///
+  /// [parcels] decides how many boxes each stop carries, because the two
+  /// cases behave differently at the door: a single parcel is a tick, and a
+  /// stop with six is what the scanner exists for.
   static Future<List<Delivery>> addStops(
     DeliveryRepository repository, {
     int count = 5,
+    ParcelLoad parcels = ParcelLoad.mixed,
     LatLng? origin,
     DateTime? now,
     Uuid uuid = const Uuid(),
@@ -255,7 +289,7 @@ class SeedData {
         status: DeliveryStatus.pending,
         scheduledFor: slot,
         notes: _notes[rng.nextInt(_notes.length)],
-        parcelCount: residential ? 1 : rng.nextInt(8) + 1,
+        parcelCount: parcels.countFor(rng, residential: residential),
         barcode: _barcodeFor(reference, nextNumber + i),
         customerPhone: rng.nextInt(3) == 0
             ? null
