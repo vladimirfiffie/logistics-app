@@ -68,7 +68,7 @@ class ReleaseNote {
 /// back into the last one.
 final releaseNotes = <ReleaseNote>[
   ReleaseNote(
-    version: '1.0.0-beta.6',
+    version: '1.0.0-beta.7',
     date: DateTime.utc(2026, 8, 12),
     headline: 'Scan the parcel, chase the failed drop, count the money.',
     highlights: [
@@ -98,16 +98,15 @@ final releaseNotes = <ReleaseNote>[
             'app never messages anyone on its own.',
       ),
       ReleaseChange(
-        'Settings you can find',
-        'One list of sixty rows is now twelve categories, each on its own '
-            'screen and each saying what is set inside it. Checking a value '
-            'usually no longer means opening anything.',
+        'Search your history',
+        'Find a stop by reference, customer, street, label or who signed for '
+            'it, and narrow it to today, this week or this month.',
       ),
       ReleaseChange(
-        'History, rebuilt',
-        'Grouped under Today and Yesterday, with a card for how the day went, '
-            'a card per stop, and a search across references, customers, '
-            'streets, labels and who signed.',
+        'A route that keeps your slots',
+        'Best route no longer moves an afternoon booking ahead of a morning '
+            'one — it reorders within a time window only, and it unpicks the '
+            'doubling-back the old ordering was prone to.',
       ),
     ],
     fixes: [
@@ -117,6 +116,64 @@ final releaseNotes = <ReleaseNote>[
             'distance was kept and the hours were not. It now offers to clock '
             'you on first — or to carry on without, if that is what you meant.',
       ),
+    ],
+    minor: [
+      'The home screen holds back the progress ring and the day\'s figures '
+          'until there is a day to report, so first thing in the morning it '
+          'shows your shift and your next stop.',
+      'Setup ends with a page listing your name, van, theme and units, and '
+          'takes you back to any of them with a tap.',
+      'Pick light, dark or follow-my-phone during setup rather than hunting '
+          'for it afterwards.',
+      'A stop being tried for the second time says so on the manifest.',
+      'Your timesheet shows the distance driven on each shift, whether or not '
+          'you have set any rates.',
+    ],
+  ),
+  ReleaseNote(
+    version: '1.0.0-beta.6',
+    date: DateTime.utc(2026, 8, 12),
+    headline: 'More screen, greener ticks, and settings you can find.',
+    highlights: [
+      ReleaseChange(
+        'Every page starts at the top',
+        'The big title bar above each tab is gone, and with it the grey slab '
+            'that slid in the moment you dragged the page. The screen is for '
+            'your round, not for a word already printed on the tab underneath.',
+      ),
+      ReleaseChange(
+        'History, rebuilt',
+        'Grouped under Today and Yesterday, with a card for how the day went '
+            'and a card per stop carrying the outcome, the time, who signed '
+            'for it and how far you drove to get there.',
+      ),
+      ReleaseChange(
+        'Delivered is green',
+        'A closed-out stop was coming out purple, orange or red depending on '
+            'your accent colour. Green means delivered now — on the chip, on '
+            'the stop, in history and on your timesheet — whatever theme you '
+            'run.',
+      ),
+      ReleaseChange(
+        'Settings you can find',
+        'One list of sixty rows is now twelve categories, each on its own '
+            'screen and each saying what is set inside it. Checking a value '
+            'usually no longer means opening anything.',
+      ),
+      ReleaseChange(
+        'Writing a van tag shows its working',
+        'Tapping "write a van tag" opens the same reader you clock on with: '
+            'hold the sticker there, and it tells you the tag is ready, or '
+            'that this particular tag will never work and why.',
+      ),
+      ReleaseChange(
+        'Just the map',
+        'Long press the live map to clear everything off it, and long press '
+            'again to bring it back. Useful on a windscreen mount, where the '
+            'panel covers the road you are looking at.',
+      ),
+    ],
+    fixes: [
       ReleaseChange(
         'No grey bar on a pull-down',
         'Dragging any page down slid a grey block in behind the title. It was '
@@ -130,24 +187,6 @@ final releaseNotes = <ReleaseNote>[
       ),
     ],
     minor: [
-      'The big title bar above each tab is gone, and with it the grey slab '
-          'that slid in the moment you dragged a page.',
-      'Delivered stops are green in every theme. They were coming out purple, '
-          'orange or red depending on your accent colour.',
-      'Best route no longer jumps a time slot: it only reorders stops booked '
-          'for the same window, and it unpicks the doubling-back the old '
-          'ordering was prone to.',
-      'Setup ends with a page listing your name, van, theme and units, and '
-          'takes you back to any of them with a tap.',
-      'Pick light, dark or follow-my-phone during setup rather than hunting '
-          'for it afterwards.',
-      'Writing a van tag opens the reader you clock on with, and says whether '
-          'the tag is ready or will never work.',
-      'Long press the live map to clear everything off it, and again to bring '
-          'it back — worth having on a windscreen mount.',
-      'The home screen holds back the progress ring and the day\'s figures '
-          'until there is a day to report, so first thing in the morning it '
-          'shows your shift and your next stop.',
       'Units are called Metric and Imperial, in setup and in Settings, rather '
           'than "km / km-h" and "mi / mph".',
       'Setup says what your unit choice does to the weather card as you pick '
