@@ -271,6 +271,56 @@ void main() {
     });
   });
 
+  group('first fix', () {
+    test('shows the phone\'s cached position until a real one lands', () async {
+      final delivery = makeDelivery();
+      await repository.saveDelivery(delivery);
+      location.cachedPosition = makePosition(latitude: 51.4);
+
+      await controller.start(delivery);
+      await pumpEventQueue();
+
+      expect(controller.lastPosition!.latitude, 51.4);
+      // Borrowed, not recorded: the trail and the odometer are the trip's
+      // record of where the van went, and a five-minute-old reading is not
+      // evidence of that.
+      expect(controller.hasLiveFix, isFalse);
+      expect(controller.points, isEmpty);
+      expect(controller.distanceMeters, 0);
+
+      location.emit(makePosition(latitude: 51.5));
+      await pumpEventQueue();
+
+      expect(controller.lastPosition!.latitude, 51.5);
+      expect(controller.hasLiveFix, isTrue);
+      expect(controller.points, hasLength(1));
+    });
+
+    test('a real fix that beat the cached one is not overwritten', () async {
+      final delivery = makeDelivery();
+      await repository.saveDelivery(delivery);
+      location.cachedPosition = makePosition(latitude: 51.4);
+
+      await controller.start(delivery);
+      location.emit(makePosition(latitude: 51.5));
+      await pumpEventQueue();
+
+      expect(controller.lastPosition!.latitude, 51.5);
+      expect(controller.hasLiveFix, isTrue);
+    });
+
+    test('nothing to borrow leaves the view honestly empty', () async {
+      final delivery = makeDelivery();
+      await repository.saveDelivery(delivery);
+
+      await controller.start(delivery);
+      await pumpEventQueue();
+
+      expect(controller.lastPosition, isNull);
+      expect(controller.hasLiveFix, isFalse);
+    });
+  });
+
   group('restore', () {
     test('picks up a trip left open by a previous process', () async {
       final delivery = makeDelivery();
@@ -299,6 +349,24 @@ void main() {
       location.emit(makePosition());
       await pumpEventQueue();
       expect(controller.points, hasLength(4));
+    });
+
+    test('draws the driver at the last breadcrumb straight away', () async {
+      final delivery = makeDelivery();
+      await repository.saveDelivery(delivery);
+      final orphan = await repository.startTrip('d1');
+      await repository.appendPoint(
+        makeTripPoint(orphan.id, DateTime(2026, 8, 11, 9), latitude: 51.3),
+      );
+      await repository.appendPoint(
+        makeTripPoint(orphan.id, DateTime(2026, 8, 11, 9, 1), latitude: 51.4),
+      );
+
+      await controller.restore();
+
+      expect(controller.lastPosition!.latitude, 51.4);
+      // Stale by however long the app was gone, and the live view says so.
+      expect(controller.hasLiveFix, isFalse);
     });
 
     test('trusts the stored distance when the trip already had one', () async {

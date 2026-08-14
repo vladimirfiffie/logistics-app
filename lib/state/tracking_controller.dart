@@ -58,6 +58,11 @@ class TrackingController extends ChangeNotifier {
   List<TripPoint> _points = [];
   double _distanceMeters = 0;
   Fix? _lastPosition;
+
+  /// False while [_lastPosition] is only a stand-in — a cached reading from
+  /// the phone, or the last breadcrumb of a trip that survived a restart —
+  /// rather than something the live stream has produced this session.
+  bool _hasLiveFix = false;
   StreamSubscription<Fix>? _subscription;
 
   /// Fires when the *system* sees the driver enter the stop's radius, which
@@ -83,6 +88,12 @@ class TrackingController extends ChangeNotifier {
   List<TripPoint> get points => UnmodifiableListView(_points);
   double get distanceMeters => _distanceMeters;
   Fix? get lastPosition => _lastPosition;
+
+  /// Whether [lastPosition] came from the live stream. False means there is
+  /// something on the map — a cached or restored reading — but the phone has
+  /// not delivered a fix of its own yet, which is a different thing to say to
+  /// the driver than "no idea where you are".
+  bool get hasLiveFix => _hasLiveFix;
   LocationReadiness get readiness => _readiness;
   Object? get error => _error;
   bool get isBusy => _isBusy;
@@ -205,7 +216,11 @@ class TrackingController extends ChangeNotifier {
     _distanceMeters = open.distanceMeters > 0
         ? open.distanceMeters
         : _measureTrail(_points);
-    _lastPosition = null;
+    // Where the driver was when the UI was killed. Stale by however long the
+    // app was gone, but a trail with a visible last breadcrumb and no marker
+    // on it is a worse lie than a marker that catches up in a few seconds.
+    _lastPosition = _points.isEmpty ? null : _points.last.toFix();
+    _hasLiveFix = false;
 
     // A resumed trip may already have announced arrival before the UI was
     // killed. The flag lives in memory, so it comes back false and the driver
@@ -240,6 +255,7 @@ class TrackingController extends ChangeNotifier {
       _points = [];
       _distanceMeters = 0;
       _lastPosition = null;
+      _hasLiveFix = false;
       _announcedArrival = false;
       await _notifications.cancelArrival();
       await _listen();
@@ -305,6 +321,7 @@ class TrackingController extends ChangeNotifier {
     _points = [];
     _distanceMeters = 0;
     _lastPosition = null;
+    _hasLiveFix = false;
     notifyListeners();
   }
 
@@ -358,6 +375,38 @@ class TrackingController extends ChangeNotifier {
             notifyListeners();
           },
         );
+    // Not awaited: the trip is already recording, and the seed is a courtesy
+    // for the screen rather than something the session depends on.
+    unawaited(_seedPosition());
+  }
+
+  /// Puts something on the map immediately instead of leaving the live view
+  /// empty until the stream produces its first reading.
+  ///
+  /// A cold GPS between buildings can take twenty seconds, and the driver
+  /// spends them looking at "waiting for the first GPS fix" with no marker, no
+  /// distance to the stop and no ETA — on a phone that, nine times in ten,
+  /// already knows roughly where it is because something else asked minutes
+  /// ago. So that reading is borrowed until the real one lands.
+  ///
+  /// It is shown, not recorded. The trail and the odometer are built from
+  /// stream fixes alone, so a reading up to five minutes old cannot bend the
+  /// recorded route or add a kilometre the van never drove.
+  Future<void> _seedPosition() async {
+    if (_lastPosition != null) return;
+    final trip = _trip;
+    if (trip == null) return;
+
+    final cached = await _location.lastKnownPosition();
+    if (cached == null) return;
+
+    // The await gives a real fix — or a stop, or the next trip — time to
+    // arrive. Any of them outrank a cached reading.
+    if (_hasLiveFix || _lastPosition != null) return;
+    if (_trip?.id != trip.id || !isTracking) return;
+
+    _lastPosition = cached;
+    notifyListeners();
   }
 
   /// Notices the driver turning location off under a running trip.
@@ -424,6 +473,7 @@ class TrackingController extends ChangeNotifier {
 
     _points.add(point);
     _lastPosition = position;
+    _hasLiveFix = true;
     notifyListeners();
 
     await _maybeAnnounceArrival();

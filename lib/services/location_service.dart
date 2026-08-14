@@ -182,29 +182,8 @@ class LocationService {
     controller = StreamController<Fix>(
       onListen: () async {
         try {
-          await libre.LibreLocation.start(
-            preset: switch (accuracy) {
-              TrackingAccuracy.precise => libre.TrackingPreset.high,
-              TrackingAccuracy.balanced => libre.TrackingPreset.balanced,
-              TrackingAccuracy.saver => libre.TrackingPreset.low,
-            },
-            config: libre.LocationConfig(
-              notification: libre.NotificationConfig(
-                title: 'Delivery tracking active',
-                text: notificationText,
-              ),
-              // A trip outlives the UI being killed — the controller restores
-              // it on the next launch — so the service must not stop when the
-              // app is swiped away.
-              stopOnTerminate: false,
-              // Recording that resumes by itself after a reboot is not
-              // something any driver asked for, and the app promises tracking
-              // runs only while a trip does.
-              startOnBoot: false,
-              // Nothing registers a headless dispatcher, so there would be
-              // nobody listening on the other side of it.
-              enableHeadless: false,
-            ),
+          await libre.LibreLocationPlatform.instance.startTracking(
+            _configFor(accuracy, notificationText),
           );
         } catch (error) {
           controller.addError(error);
@@ -231,6 +210,80 @@ class LocationService {
 
     return controller.stream;
   }
+
+  /// The plugin's native settings, built from the driver's chosen
+  /// [TrackingAccuracy].
+  ///
+  /// The plugin ships three presets and they were what this used to pass. The
+  /// trouble is what they are tuned for: "roughly where is my friend today",
+  /// on a battery that has to last until bedtime. Its balanced preset asks for
+  /// a fix every ten seconds in the foreground, only takes one after 25 metres
+  /// of movement, and puts the *network* provider first — GPS is only brought
+  /// in once its own motion detection decides the phone is moving. That is a
+  /// map that lurches a block at a time and a first fix that can be half a
+  /// minute coming, which is exactly what a driver watching the live tab
+  /// complains about.
+  ///
+  /// So the app's own accuracy levels are sent through directly rather than
+  /// being flattened into a preset. They already carry the numbers a delivery
+  /// round wants; until now nothing was reading them.
+  ///
+  /// Two things worth knowing about the result:
+  ///
+  /// * The plugin enforces a 50m floor on the distance filter while it thinks
+  ///   the phone is moving, so at road speed fixes land every four seconds or
+  ///   so rather than at [TrackingAccuracy.intervalSeconds] exactly. The
+  ///   interval is what governs a slow crawl through an estate.
+  /// * Bypassing the preset also bypasses the plugin's automatic relaxation
+  ///   when the app is backgrounded. That is deliberate — a trail that goes
+  ///   coarse the moment the driver switches to their nav app is the other
+  ///   half of this complaint — and it is what the battery saver level is for.
+  static libre.NativeConfig _configFor(
+    TrackingAccuracy accuracy,
+    String notificationText,
+  ) => libre.NativeConfig(
+    // Battery saver is the one level allowed to take a network fix instead of
+    // waking the GPS.
+    accuracy: accuracy == TrackingAccuracy.saver
+        ? libre.Accuracy.balanced
+        : libre.Accuracy.high,
+    mode: accuracy == TrackingAccuracy.saver
+        ? libre.TrackingMode.balanced
+        : libre.TrackingMode.active,
+    intervalMs: accuracy.intervalSeconds * 1000,
+    distanceFilter: accuracy.distanceFilterMeters.toDouble(),
+    // How often a fix is taken while the van is parked and the plugin has
+    // stopped asking for continuous updates. Without this the live view can
+    // sit on a reading from the last time the driver moved.
+    heartbeatInterval: switch (accuracy) {
+      TrackingAccuracy.precise => 60,
+      TrackingAccuracy.balanced => 120,
+      TrackingAccuracy.saver => 300,
+    },
+    // The plugin drops any reading worse than this before the app ever sees
+    // it, and its presets set it as tight as 50m. A cold first fix is often
+    // coarser than that, which means the driver stares at "waiting for the
+    // first GPS fix" while perfectly usable readings are being thrown away
+    // upstream. The controller keeps anything over 50m out of the odometer
+    // itself, so a loose gate here costs nothing and puts them on the map.
+    maxAccuracy: accuracy == TrackingAccuracy.saver ? 300 : 200,
+    // Standing at a door is not a reason to stop recording.
+    pausesLocationUpdatesAutomatically: false,
+    // A trip outlives the UI being killed — the controller restores it on the
+    // next launch — so the service must not stop when the app is swiped away.
+    stopOnTerminate: false,
+    // Recording that resumes by itself after a reboot is not something any
+    // driver asked for, and the app promises tracking runs only while a trip
+    // does.
+    startOnBoot: false,
+    // Nothing registers a headless dispatcher, so there would be nobody
+    // listening on the other side of it.
+    enableHeadless: false,
+    notification: libre.NotificationConfig(
+      title: 'Delivery tracking active',
+      text: notificationText,
+    ),
+  );
 
   /// Asks the OS to watch a circle around a stop and say when the driver
   /// enters it.

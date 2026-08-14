@@ -68,6 +68,48 @@ class ReleaseNote {
 /// back into the last one.
 final releaseNotes = <ReleaseNote>[
   ReleaseNote(
+    version: '1.0.0-beta.11',
+    date: DateTime.utc(2026, 8, 13),
+    headline: 'The live map keeps up with the van.',
+    fixes: [
+      ReleaseChange(
+        'The map keeps up now',
+        'Your position moved in ten-second jumps whichever tracking accuracy '
+            'you had chosen — the three settings all came out the same '
+            'underneath. Precise, Balanced and Battery saver now mean what '
+            'they say, and at road speed the map redraws every few seconds '
+            'instead of a block at a time.',
+      ),
+      ReleaseChange(
+        'GPS is used from the start',
+        'Balanced tracking was asking the network for your position first and '
+            'only reaching for GPS once the phone worked out it was moving, '
+            'which is the other half of why the trail lagged behind you.',
+      ),
+      ReleaseChange(
+        'Less waiting for the first fix',
+        'Starting a trip put you on "waiting for the first GPS fix" with no '
+            'position, no distance to the stop and no ETA until the phone got '
+            'a lock. It now shows where the phone last knew you were while '
+            'the real fix arrives, and says which one you are looking at. The '
+            'first fix also no longer gets thrown away for being a coarse '
+            'one.',
+      ),
+      ReleaseChange(
+        'A resumed trip draws itself',
+        'If the app was killed mid-round, reopening it showed the trail so '
+            'far with nothing on the end of it. You are drawn at your last '
+            'breadcrumb straight away.',
+      ),
+    ],
+    minor: [
+      'Recording no longer goes coarse when you switch to your nav app; the '
+          'accuracy you picked is what runs, foreground or background. '
+          'Battery saver is the setting for a lighter round.',
+      'Standing at a door no longer counts as a reason to pause updates.',
+    ],
+  ),
+  ReleaseNote(
     version: '1.0.0-beta.10',
     date: DateTime.utc(2026, 8, 13),
     headline: 'A map that turns with you, and tracking that holds on.',

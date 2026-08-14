@@ -1018,7 +1018,10 @@ class _TripPanel extends StatelessWidget {
             ),
           ],
 
-          if (fix == null && tracking.isTracking) ...[
+          // Two different waits, and saying which one it is matters: an empty
+          // map means the phone has nothing at all, while a marker sitting on
+          // a last known position means it has something and is catching up.
+          if (!tracking.hasLiveFix && tracking.isTracking) ...[
             const SizedBox(height: 10),
             Row(
               children: [
@@ -1029,7 +1032,9 @@ class _TripPanel extends StatelessWidget {
                 ),
                 const SizedBox(width: 10),
                 Text(
-                  'Waiting for the first GPS fix…',
+                  fix == null
+                      ? 'Waiting for the first GPS fix…'
+                      : 'Last known position — waiting for a live fix…',
                   style: theme.textTheme.bodySmall,
                 ),
               ],

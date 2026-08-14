@@ -46,6 +46,19 @@ class TripPoint {
     recordedAt: position.timestamp,
   );
 
+  /// The breadcrumb read back as a reading. Used to put a resumed trip on the
+  /// map straight away, rather than leaving it blank until the stream
+  /// produces its first fix.
+  Fix toFix() => Fix(
+    latitude: latitude,
+    longitude: longitude,
+    accuracy: accuracy,
+    speed: speed,
+    heading: heading,
+    altitude: altitude,
+    timestamp: recordedAt,
+  );
+
   Map<String, Object?> toMap() => {
     if (id != null) 'id': id,
     'trip_id': tripId,

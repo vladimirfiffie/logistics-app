@@ -334,8 +334,11 @@ class FakeLocationService implements LocationService {
   @override
   Future<Fix> currentPosition() async => makePosition();
 
+  /// What the fake phone already had lying about, if anything.
+  Fix? cachedPosition;
+
   @override
-  Future<Fix?> lastKnownPosition() async => null;
+  Future<Fix?> lastKnownPosition() async => cachedPosition;
 
   /// The accuracy the controller asked for on the most recent start.
   TrackingAccuracy? lastAccuracy;
